@@ -1,0 +1,189 @@
+import { useNavigate } from 'react-router-dom';
+import { Star, Shield, Zap, Users, TrendingUp, Lock, Play, ArrowRight, CheckCircle } from '../components/icons';
+import { mockCreators } from '../data/users';
+
+export function Landing() {
+	const navigate = useNavigate();
+
+	return (
+		<div className="min-h-screen bg-[#0d0d0d] text-white overflow-x-hidden">
+			<nav className="fixed top-0 left-0 right-0 z-40 bg-[#0d0d0d]/80 backdrop-blur-xl border-b border-white/5">
+				<div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+					<div className="flex items-center gap-2">
+						<div className="w-7 h-7 bg-rose-500 rounded-lg flex items-center justify-center">
+							<span className="text-white font-black text-sm">cw</span>
+						</div>
+						<span className="font-bold text-white">creators.web</span>
+					</div>
+					<div className="flex items-center gap-2">
+						<button
+							onClick={() => navigate('/login')}
+							className="text-sm text-white/60 hover:text-white px-3 py-1.5 rounded-lg transition-colors"
+						>
+							Sign In
+						</button>
+						<button
+							onClick={() => navigate('/register')}
+							className="bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold px-4 py-1.5 rounded-xl transition-all active:scale-95"
+						>
+							Get Started
+						</button>
+					</div>
+				</div>
+			</nav>
+
+			<section className="relative min-h-screen flex items-center pt-14">
+				<div className="absolute inset-0 overflow-hidden">
+					<div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-rose-500/10 rounded-full blur-[120px]" />
+					<div className="absolute top-1/3 left-1/4 w-[300px] h-[300px] bg-rose-800/10 rounded-full blur-[80px]" />
+				</div>
+
+				<div className="relative max-w-6xl mx-auto px-4 py-20 text-center">
+					<div className="inline-flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-4 py-1.5 mb-6">
+						<Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+						<span className="text-xs text-white/70 font-medium">The #1 Creator Monetization Platform</span>
+					</div>
+
+					<h1 className="text-4xl sm:text-6xl md:text-7xl font-black mb-6 leading-[1.05]">
+						Create. Share.
+						<br />
+						<span className="text-rose-400">Earn Freely.</span>
+					</h1>
+
+					<p className="text-base sm:text-xl text-white/50 max-w-2xl mx-auto mb-10 leading-relaxed">
+						Build a loyal fanbase, monetize your content with subscriptions and tips,
+						and connect directly with your audience — all in one premium platform.
+					</p>
+
+					<div className="flex flex-col sm:flex-row gap-3 justify-center mb-16">
+						<button
+							onClick={() => navigate('/register')}
+							className="flex items-center justify-center gap-2 bg-rose-500 hover:bg-rose-600 text-white font-bold px-8 py-3.5 rounded-2xl transition-all active:scale-95 shadow-2xl shadow-rose-500/30 text-base"
+						>
+							Start Creating — Free
+							<ArrowRight className="w-4 h-4" />
+						</button>
+						<button
+							onClick={() => navigate('/explore')}
+							className="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 text-white font-semibold px-8 py-3.5 rounded-2xl transition-all text-base"
+						>
+							<Play className="w-4 h-4" />
+							Explore Creators
+						</button>
+					</div>
+
+					<div className="grid grid-cols-3 gap-4 max-w-sm mx-auto">
+						{[
+							{ value: '50K+', label: 'Creators' },
+							{ value: '$2M+', label: 'Paid Out' },
+							{ value: '1M+', label: 'Fans' },
+						].map(stat => (
+							<div key={stat.label} className="text-center">
+								<p className="text-2xl font-black text-white">{stat.value}</p>
+								<p className="text-xs text-white/40">{stat.label}</p>
+							</div>
+						))}
+					</div>
+				</div>
+			</section>
+
+			<section className="py-16 px-4">
+				<div className="max-w-6xl mx-auto">
+					<div className="text-center mb-10">
+						<h2 className="text-2xl sm:text-3xl font-bold mb-2">Featured Creators</h2>
+						<p className="text-white/40 text-sm">Join thousands of creators already earning</p>
+					</div>
+					<div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+						{mockCreators.slice(0, 5).map(creator => (
+							<div
+								key={creator.id}
+								onClick={() => navigate('/explore')}
+								className="bg-[#161616] border border-white/5 rounded-2xl overflow-hidden cursor-pointer hover:border-rose-500/30 transition-all group"
+							>
+								<div className="relative h-20">
+									<img src={creator.banner} alt="" className="w-full h-full object-cover" />
+									<div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#161616]" />
+								</div>
+								<div className="px-2.5 pb-3">
+									<img src={creator.avatar} alt="" className="w-9 h-9 rounded-full border-2 border-[#161616] -mt-4 mb-1 object-cover" />
+									<p className="text-xs font-semibold text-white truncate group-hover:text-rose-400 transition-colors">{creator.name}</p>
+									<p className="text-[10px] text-white/40 truncate">{creator.category}</p>
+									<p className="text-[10px] text-rose-400 font-semibold mt-0.5">${creator.subscriptionPrice}/mo</p>
+								</div>
+							</div>
+						))}
+					</div>
+				</div>
+			</section>
+
+			<section className="py-16 px-4 bg-[#111111]">
+				<div className="max-w-4xl mx-auto">
+					<div className="text-center mb-12">
+						<h2 className="text-2xl sm:text-3xl font-bold mb-2">Everything you need</h2>
+						<p className="text-white/40">Built for creators, loved by fans</p>
+					</div>
+					<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+						{[
+							{ icon: Lock, title: 'Paywalled Content', desc: 'Lock exclusive content behind subscriptions or one-time payments' },
+							{ icon: Zap, title: 'Instant Tips', desc: 'Fans can send tips directly to show appreciation' },
+							{ icon: Users, title: 'Direct Messaging', desc: 'Real-time 1:1 chat with your entire fanbase' },
+							{ icon: TrendingUp, title: 'Earnings Dashboard', desc: 'Track your monthly earnings, tips, and growth in real-time' },
+							{ icon: Shield, title: 'Verified Creators', desc: 'KYC verification builds trust with your audience' },
+							{ icon: Star, title: 'PPV Content', desc: 'Set custom pay-per-view prices for premium content' },
+						].map(({ icon: Icon, title, desc }) => (
+							<div key={title} className="bg-[#161616] border border-white/5 rounded-2xl p-5">
+								<div className="w-10 h-10 bg-rose-500/15 rounded-xl flex items-center justify-center mb-3">
+									<Icon className="w-5 h-5 text-rose-400" />
+								</div>
+								<h3 className="font-semibold text-white mb-1.5">{title}</h3>
+								<p className="text-sm text-white/40 leading-relaxed">{desc}</p>
+							</div>
+						))}
+					</div>
+				</div>
+			</section>
+
+			<section className="py-16 px-4">
+				<div className="max-w-2xl mx-auto text-center">
+					<h2 className="text-2xl sm:text-3xl font-bold mb-3">Try the Demo</h2>
+					<p className="text-white/40 mb-8 text-sm">Explore all features instantly — no credit card needed</p>
+					<div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
+						{[
+							{ role: 'Fan', email: 'fan@demo.com', desc: 'Browse, subscribe, tip', color: 'border-blue-500/30 bg-blue-500/5' },
+							{ role: 'Creator', email: 'creator@demo.com', desc: 'Dashboard, earnings, posts', color: 'border-rose-500/30 bg-rose-500/5' },
+							{ role: 'Admin', email: 'admin@demo.com', desc: 'Full platform control', color: 'border-emerald-500/30 bg-emerald-500/5' },
+						].map(({ role, email, desc, color }) => (
+							<div key={role} className={`border ${color} rounded-xl p-4 text-left`}>
+								<div className="flex items-center gap-1.5 mb-2">
+									<CheckCircle className="w-4 h-4 text-emerald-400" />
+									<span className="text-sm font-semibold text-white">{role} Account</span>
+								</div>
+								<p className="text-xs text-white/50 mb-1">{email}</p>
+								<p className="text-xs text-white/30">Password: demo123</p>
+								<p className="text-xs text-white/40 mt-2">{desc}</p>
+							</div>
+						))}
+					</div>
+					<button
+						onClick={() => navigate('/login')}
+						className="bg-rose-500 hover:bg-rose-600 text-white font-bold px-10 py-3.5 rounded-2xl transition-all active:scale-95 shadow-xl shadow-rose-500/25 text-base"
+					>
+						Login Now — It's Free
+					</button>
+				</div>
+			</section>
+
+			<footer className="border-t border-white/5 py-8 px-4">
+				<div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+					<div className="flex items-center gap-2">
+						<div className="w-6 h-6 bg-rose-500 rounded-lg flex items-center justify-center">
+							<span className="text-white font-black text-[10px]">cw</span>
+						</div>
+						<span className="text-sm font-bold text-white">creators.web</span>
+					</div>
+					<p className="text-xs text-white/30">© 2026 creators.web. All rights reserved. 18+ only.</p>
+				</div>
+			</footer>
+		</div>
+	);
+}

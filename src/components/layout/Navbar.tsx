@@ -1,0 +1,176 @@
+import { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Bell, Wallet, ChevronDown, LogOut, Settings, User, Shield, LayoutDashboard } from '../icons';
+import { useAuth } from '../../context/AuthContext';
+import { useNotifications } from '../../context/NotificationContext';
+import { useChat } from '../../context/ChatContext';
+import { Avatar } from '../ui/Avatar';
+import { NotificationPanel } from './NotificationPanel';
+
+export function Navbar() {
+	const navigate = useNavigate();
+	const location = useLocation();
+	const { state: authState, logout } = useAuth();
+	const { getUnreadCount } = useNotifications();
+	const { totalUnread } = useChat();
+	const [showUserMenu, setShowUserMenu] = useState(false);
+	const [showNotifications, setShowNotifications] = useState(false);
+
+	const user = authState.user;
+	const unreadNotifs = user ? getUnreadCount(user.id) : 0;
+
+	function handleLogout() {
+		logout();
+		navigate('/');
+		setShowUserMenu(false);
+	}
+
+	if (!user) return null;
+
+	const isCreator = user.role === 'creator';
+	const isAdmin = user.role === 'admin';
+
+	return (
+		<nav className="fixed top-0 left-0 right-0 z-40 bg-[#0d0d0d]/90 backdrop-blur-xl border-b border-white/5">
+			<div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+				<button
+					onClick={() => navigate(isAdmin ? '/admin' : isCreator ? '/creator-dashboard' : '/feed')}
+					className="flex items-center gap-2 shrink-0"
+				>
+					<div className="w-7 h-7 bg-rose-500 rounded-lg flex items-center justify-center">
+						<span className="text-white font-black text-sm">cw</span>
+					</div>
+					<span className="font-bold text-white text-base hidden sm:block">creators.web</span>
+				</button>
+
+				{!isAdmin && (
+					<div className="hidden md:flex items-center gap-1">
+						{!isCreator && (
+							<>
+								<NavLink label="Feed" path="/feed" current={location.pathname} onClick={() => navigate('/feed')} />
+								<NavLink label="Explore" path="/explore" current={location.pathname} onClick={() => navigate('/explore')} />
+								<NavLink label="Messages" path="/messages" current={location.pathname} onClick={() => navigate('/messages')} badge={totalUnread} />
+							</>
+						)}
+						{isCreator && (
+							<>
+								<NavLink label="Dashboard" path="/creator-dashboard" current={location.pathname} onClick={() => navigate('/creator-dashboard')} />
+								<NavLink label="Content" path="/creator-dashboard/content" current={location.pathname} onClick={() => navigate('/creator-dashboard/content')} />
+								<NavLink label="Messages" path="/messages" current={location.pathname} onClick={() => navigate('/messages')} badge={totalUnread} />
+								<NavLink label="Earnings" path="/creator-dashboard/earnings" current={location.pathname} onClick={() => navigate('/creator-dashboard/earnings')} />
+							</>
+						)}
+					</div>
+				)}
+
+				{isAdmin && (
+					<div className="hidden md:flex items-center gap-1">
+						<NavLink label="Dashboard" path="/admin" current={location.pathname} onClick={() => navigate('/admin')} />
+						<NavLink label="KYC Queue" path="/admin/creators" current={location.pathname} onClick={() => navigate('/admin/creators')} />
+						<NavLink label="Users" path="/admin/users" current={location.pathname} onClick={() => navigate('/admin/users')} />
+						<NavLink label="Moderation" path="/admin/moderation" current={location.pathname} onClick={() => navigate('/admin/moderation')} />
+						<NavLink label="reports" path="/admin/reports" current={location.pathname} onClick={() => navigate('/admin/reports')} />
+					</div>
+				)}
+
+				<div className="flex items-center gap-2 shrink-0">
+					{!isAdmin && !isCreator && (
+						<button
+							onClick={() => navigate('/wallet')}
+							className="hidden sm:flex items-center gap-1.5 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-xl transition-colors"
+						>
+							<Wallet className="w-3.5 h-3.5 text-emerald-400" />
+							<span className="text-xs font-semibold text-white">${user.walletBalance.toFixed(2)}</span>
+						</button>
+					)}
+
+					<div className="relative">
+						<button
+							onClick={() => { setShowNotifications(v => !v); setShowUserMenu(false); }}
+							className="relative p-2 rounded-xl hover:bg-white/10 transition-colors"
+						>
+							<Bell className="w-5 h-5 text-white/70" />
+							{unreadNotifs > 0 && (
+								<span className="absolute top-0.5 right-0.5 w-4 h-4 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+									{unreadNotifs > 9 ? '9+' : unreadNotifs}
+								</span>
+							)}
+						</button>
+						{showNotifications && <NotificationPanel onClose={() => setShowNotifications(false)} />}
+					</div>
+
+					<div className="relative">
+						<button
+							onClick={() => { setShowUserMenu(v => !v); setShowNotifications(false); }}
+							className="flex items-center gap-2 hover:bg-white/10 pl-1 pr-2 py-1 rounded-xl transition-colors"
+						>
+							<Avatar src={user.avatar} alt={user.name} size="sm" />
+							<ChevronDown className="w-3.5 h-3.5 text-white/40 hidden sm:block" />
+						</button>
+
+						{showUserMenu && (
+							<div className="absolute right-0 top-full mt-2 w-52 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl py-1.5 z-50">
+								<div className="px-3 py-2 border-b border-white/5 mb-1">
+									<p className="text-sm font-semibold text-white truncate">{user.name}</p>
+									<p className="text-xs text-white/40 truncate">{user.email}</p>
+									{!isAdmin && <p className="text-xs text-white/30 mt-0.5">Balance: ${user.walletBalance.toFixed(2)}</p>}
+								</div>
+
+								{!isAdmin && (
+									<MenuItem icon={<User className="w-4 h-4" />} label="Profile" onClick={() => { navigate(isCreator ? `/creator/${user.id}` : '/settings'); setShowUserMenu(false); }} />
+								)}
+								{!isCreator && !isAdmin && (
+									<MenuItem icon={<Wallet className="w-4 h-4" />} label="Wallet" onClick={() => { navigate('/wallet'); setShowUserMenu(false); }} />
+								)}
+								{isCreator && (
+									<MenuItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" onClick={() => { navigate('/creator-dashboard'); setShowUserMenu(false); }} />
+								)}
+								{isAdmin && (
+									<MenuItem icon={<Shield className="w-4 h-4" />} label="Admin Panel" onClick={() => { navigate('/admin'); setShowUserMenu(false); }} />
+								)}
+								<MenuItem icon={<Settings className="w-4 h-4" />} label="Settings" onClick={() => { navigate('/settings'); setShowUserMenu(false); }} />
+								<div className="border-t border-white/5 mt-1 pt-1">
+									<MenuItem icon={<LogOut className="w-4 h-4" />} label="Sign Out" onClick={handleLogout} danger />
+								</div>
+							</div>
+						)}
+					</div>
+				</div>
+			</div>
+		</nav>
+	);
+}
+
+function NavLink({ label, path, current, onClick, badge }: { label: string, path: string, current: string, onClick: () => void, badge?: number }) {
+	const isActive = current === path || (path !== '/' && current.startsWith(path));
+	return (
+		<button
+			onClick={onClick}
+			className={`relative px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+				isActive ? 'text-white bg-white/10' : 'text-white/50 hover:text-white hover:bg-white/5'
+			}`}
+		>
+			{label}
+			{badge && badge > 0 ? (
+				<span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+					{badge > 9 ? '9+' : badge}
+				</span>
+			) : null}
+		</button>
+	);
+}
+
+function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode, label: string, onClick: () => void, danger?: boolean }) {
+	return (
+		<button
+			onClick={onClick}
+			className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors rounded-lg mx-1 ${
+				danger ? 'text-rose-400 hover:bg-rose-500/10' : 'text-white/70 hover:text-white hover:bg-white/10'
+			}`}
+			style={{ width: 'calc(100% - 8px)' }}
+		>
+			{icon}
+			{label}
+		</button>
+	);
+}

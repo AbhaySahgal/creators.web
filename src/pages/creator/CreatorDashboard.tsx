@@ -1,0 +1,316 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { TrendingUp, Users, Zap, DollarSign, ArrowRight, Star, Eye, Radio, MessageCircle, Phone, Video, Clock } from '../../components/icons';
+import { Layout } from '../../components/layout/Layout';
+import { useCurrentCreator } from '../../context/AuthContext';
+import { useContent } from '../../context/ContentContext';
+import { useSession } from '../../context/SessionContext';
+import { mockCreators } from '../../data/users';
+
+function StatCard({ label, value, sub, icon, color, onClick }: {
+	label: string, value: string, sub?: string, icon: React.ReactNode, color: string, onClick?: () => void,
+}) {
+	return (
+		<button
+			onClick={onClick}
+			className={`bg-[#161616] border border-white/5 rounded-2xl p-4 text-left hover:border-white/10 transition-all group ${onClick ? 'cursor-pointer' : 'cursor-default'}`}
+		>
+			<div className="flex items-start justify-between mb-3">
+				<div className={`w-10 h-10 rounded-xl flex items-center justify-center ${color}`}>
+					{icon}
+				</div>
+				{onClick && <ArrowRight className="w-4 h-4 text-white/20 group-hover:text-white/50 transition-colors" />}
+			</div>
+			<p className="text-2xl font-black text-white mb-0.5">{value}</p>
+			<p className="text-xs text-white/40 font-medium">{label}</p>
+			{sub && <p className="text-xs text-white/25 mt-0.5">{sub}</p>}
+		</button>
+	);
+}
+
+function formatSessionType(type: string) {
+	if (type === 'chat') return { label: 'Chat', icon: MessageCircle, color: 'text-emerald-400' };
+	if (type === 'audio') return { label: 'Audio', icon: Phone, color: 'text-sky-400' };
+	return { label: 'Video', icon: Video, color: 'text-rose-400' };
+}
+
+function formatDuration(secs: number): string {
+	const m = Math.floor(secs / 60);
+	const s = secs % 60;
+	return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
+export function CreatorDashboard() {
+	const navigate = useNavigate();
+	const creator = useCurrentCreator();
+	const { state: contentState } = useContent();
+	const { state: sessionState } = useSession();
+	const [editingRate, setEditingRate] = useState(false);
+	const [rateInput, setRateInput] = useState('');
+
+	const creatorData = creator ?? mockCreators[0];
+	const creatorPosts = contentState.posts.filter(p => p.creatorId === creatorData.id);
+
+	const creatorSessions = sessionState.sessionHistory.filter(s => s.creatorId === creatorData.id);
+	const sessionEarnings = creatorSessions.reduce((sum, s) => sum + s.earnings, 0);
+
+	if (creatorData.kycStatus !== 'approved') {
+		return (
+			<Layout>
+				<div className="max-w-lg mx-auto px-4 py-12 text-center">
+					<div className="w-16 h-16 bg-amber-500/15 rounded-2xl flex items-center justify-center mx-auto mb-4">
+						<Star className="w-8 h-8 text-amber-400" />
+					</div>
+					<h2 className="text-xl font-bold text-white mb-2">
+						{creatorData.kycStatus === 'pending' ? 'KYC Verification Pending' :
+						creatorData.kycStatus === 'rejected' ? 'KYC Rejected' :
+						'Complete KYC Verification'}
+					</h2>
+					<p className="text-white/40 text-sm mb-6">
+						{creatorData.kycStatus === 'pending' ?
+							'Your identity verification is being reviewed. This usually takes 1-2 business days.' :
+							creatorData.kycStatus === 'rejected' ?
+								'Your KYC was rejected. Please resubmit with clearer documents.' :
+								'Verify your identity to start earning on creators.web.'}
+					</p>
+					<button
+						onClick={() => navigate('/creator-dashboard/kyc')}
+						className="bg-rose-500 hover:bg-rose-600 text-white font-semibold px-6 py-2.5 rounded-xl transition-all"
+					>
+						{creatorData.kycStatus === 'rejected' ? 'Resubmit KYC' : 'Submit KYC Documents'}
+					</button>
+				</div>
+			</Layout>
+		);
+	}
+
+	const lastMonth = creatorData.monthlyStats[creatorData.monthlyStats.length - 2];
+	const thisMonth = creatorData.monthlyStats[creatorData.monthlyStats.length - 1];
+	const earningsGrowth = lastMonth ? ((thisMonth.earnings - lastMonth.earnings) / lastMonth.earnings * 100).toFixed(1) : 0;
+
+	return (
+		<Layout>
+			<div className="max-w-4xl mx-auto px-4 py-6">
+				<div className="flex items-start justify-between mb-6">
+					<div>
+						<h1 className="text-2xl font-bold text-white">Dashboard</h1>
+						<p className="text-white/40 text-sm">Welcome back, {creatorData.name.split(' ')[0]}</p>
+					</div>
+					<div className="flex items-center gap-2">
+						<button
+							onClick={() => navigate('/go-live')}
+							className="bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 text-sm font-semibold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5"
+						>
+							<Radio className="w-4 h-4" />
+							Go Live
+						</button>
+						<button
+							onClick={() => navigate('/creator-dashboard/content')}
+							className="bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-all"
+						>
+							+ New Post
+						</button>
+					</div>
+				</div>
+
+				<div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+					<StatCard
+						label="Monthly Earnings"
+						value={`$${creatorData.monthlyEarnings.toLocaleString()}`}
+						sub={`+${earningsGrowth}% vs last month`}
+						icon={<DollarSign className="w-5 h-5 text-emerald-400" />}
+						color="bg-emerald-500/15"
+						onClick={() => navigate('/creator-dashboard/earnings')}
+					/>
+					<StatCard
+						label="Subscribers"
+						value={creatorData.subscriberCount.toLocaleString()}
+						sub="Active this month"
+						icon={<Users className="w-5 h-5 text-blue-400" />}
+						color="bg-blue-500/15"
+						onClick={() => navigate('/creator-dashboard/subscribers')}
+					/>
+					<StatCard
+						label="Session Earnings"
+						value={`$${sessionEarnings.toFixed(2)}`}
+						sub={`${creatorSessions.length} sessions`}
+						icon={<Zap className="w-5 h-5 text-amber-400" />}
+						color="bg-amber-500/15"
+					/>
+					<StatCard
+						label="Total Earnings"
+						value={`$${creatorData.totalEarnings.toLocaleString()}`}
+						sub="All time"
+						icon={<TrendingUp className="w-5 h-5 text-rose-400" />}
+						color="bg-rose-500/15"
+					/>
+				</div>
+
+				<div className="bg-[#161616] border border-white/5 rounded-2xl p-4 mb-4">
+					<div className="flex items-center justify-between mb-3">
+						<div>
+							<h3 className="text-sm font-semibold text-white">Per-Minute Rate</h3>
+							<p className="text-xs text-white/40 mt-0.5">Charged for chat, audio & video sessions</p>
+						</div>
+						{!editingRate ? (
+							<button
+								onClick={() => { setRateInput(creatorData.perMinuteRate.toFixed(2)); setEditingRate(true); }}
+								className="text-xs text-rose-400 hover:text-rose-300 font-semibold transition-colors"
+							>
+								Edit Rate
+							</button>
+						) : (
+							<button
+								onClick={() => setEditingRate(false)}
+								className="text-xs text-white/40 hover:text-white/60 font-semibold transition-colors"
+							>
+								Cancel
+							</button>
+						)}
+					</div>
+					{editingRate ? (
+						<div className="flex items-center gap-3">
+							<div className="flex-1 flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+								<span className="text-white/40 text-sm">$</span>
+								<input
+									type="number"
+									min="0.50"
+									max="99.99"
+									step="0.01"
+									value={rateInput}
+									onChange={e => setRateInput(e.target.value)}
+									className="flex-1 bg-transparent text-white text-sm focus:outline-none"
+								/>
+								<span className="text-white/40 text-xs">/min</span>
+							</div>
+							<button
+								onClick={() => setEditingRate(false)}
+								className="bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-all"
+							>
+								Save
+							</button>
+						</div>
+					) : (
+						<div className="flex items-center gap-3">
+							<div className="text-3xl font-black text-white">${creatorData.perMinuteRate.toFixed(2)}</div>
+							<span className="text-white/30 text-sm">/minute</span>
+							<div className="ml-auto flex flex-col items-end gap-1">
+								{[5, 10, 15].map(m => (
+									<div key={m} className="flex items-center gap-2 text-xs text-white/30">
+										<Clock className="w-3 h-3" />
+										{m}min = <span className="text-white/50 font-semibold">${(m * creatorData.perMinuteRate).toFixed(2)}</span>
+									</div>
+								))}
+							</div>
+						</div>
+					)}
+				</div>
+
+				<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+					<div className="bg-[#161616] border border-white/5 rounded-2xl p-4">
+						<div className="flex items-center justify-between mb-3">
+							<h3 className="text-sm font-semibold text-white">Earnings (6 months)</h3>
+							<TrendingUp className="w-4 h-4 text-rose-400" />
+						</div>
+						<div className="flex items-end gap-1.5 h-24">
+							{creatorData.monthlyStats.map((stat, i) => {
+								const max = Math.max(...creatorData.monthlyStats.map(s => s.earnings));
+								const pct = (stat.earnings / max) * 100;
+								return (
+									<div key={i} className="flex-1 flex flex-col items-center gap-1">
+										<div
+											className="w-full rounded-t-lg bg-gradient-to-t from-rose-600 to-rose-400 transition-all duration-500"
+											style={{ height: `${pct}%` }}
+										/>
+										<p className="text-[9px] text-white/30">{stat.month}</p>
+									</div>
+								);
+							})}
+						</div>
+					</div>
+
+					<div className="bg-[#161616] border border-white/5 rounded-2xl p-4">
+						<div className="flex items-center justify-between mb-3">
+							<h3 className="text-sm font-semibold text-white">Recent Sessions</h3>
+						</div>
+						{creatorSessions.length === 0 ? (
+							<div className="flex flex-col items-center justify-center py-4">
+								<p className="text-xs text-white/30">No sessions yet</p>
+							</div>
+						) : (
+							<div className="space-y-2.5">
+								{creatorSessions.slice(0, 4).map(sess => {
+									const typeInfo = formatSessionType(sess.type);
+									const Icon = typeInfo.icon;
+									return (
+										<div key={sess.id} className="flex items-center gap-2.5">
+											<div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center shrink-0">
+												<Icon className={`w-4 h-4 ${typeInfo.color}`} />
+											</div>
+											<div className="flex-1 min-w-0">
+												<p className="text-xs text-white/70 font-medium truncate">{sess.fanName}</p>
+												<p className="text-[10px] text-white/30">
+													{typeInfo.label} · {sess.durationMinutes}min
+													{sess.actualDurationSeconds && ` · ${formatDuration(sess.actualDurationSeconds)}`}
+												</p>
+											</div>
+											<span className="text-xs font-bold text-emerald-400">+${sess.earnings.toFixed(2)}</span>
+										</div>
+									);
+								})}
+							</div>
+						)}
+					</div>
+				</div>
+
+				<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+					<div className="bg-[#161616] border border-white/5 rounded-2xl p-4">
+						<h3 className="text-sm font-semibold text-white mb-3">Recent Posts</h3>
+						<div className="space-y-2.5">
+							{creatorPosts.slice(0, 4).map(post => (
+								<div key={post.id} className="flex items-center gap-2.5">
+									{post.mediaUrl ? (
+										<img src={post.mediaUrl} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
+									) : (
+										<div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center shrink-0">
+											<span className="text-xs text-white/30">T</span>
+										</div>
+									)}
+									<div className="flex-1 min-w-0">
+										<p className="text-xs text-white/70 truncate">{post.text.slice(0, 50)}...</p>
+										<div className="flex items-center gap-2 mt-0.5">
+											<span className="text-[10px] text-white/30 flex items-center gap-0.5">
+												<Eye className="w-2.5 h-2.5" /> {post.likes}
+											</span>
+											{post.isLocked && <span className="text-[10px] text-rose-400">Locked</span>}
+										</div>
+									</div>
+								</div>
+							))}
+						</div>
+					</div>
+
+					<div className="bg-[#161616] border border-white/5 rounded-2xl p-4">
+						<h3 className="text-sm font-semibold text-white mb-3">Quick Actions</h3>
+						<div className="grid grid-cols-2 gap-2">
+							{[
+								{ label: 'Go Live', path: '/go-live', color: 'bg-rose-500/15 text-rose-400' },
+								{ label: 'Earnings', path: '/creator-dashboard/earnings', color: 'bg-emerald-500/15 text-emerald-400' },
+								{ label: 'Subscribers', path: '/creator-dashboard/subscribers', color: 'bg-blue-500/15 text-blue-400' },
+								{ label: 'Edit Profile', path: '/creator-dashboard/profile', color: 'bg-amber-500/15 text-amber-400' },
+							].map(({ label, path, color }) => (
+								<button
+									key={label}
+									onClick={() => navigate(path)}
+									className={`${color} rounded-xl py-2.5 text-xs font-semibold transition-all hover:opacity-80`}
+								>
+									{label}
+								</button>
+							))}
+						</div>
+					</div>
+				</div>
+			</div>
+		</Layout>
+	);
+}

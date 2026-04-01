@@ -1,0 +1,242 @@
+import { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Send, Image as ImageIcon, Zap, Lock, Unlock, CheckCheck, Check, Phone, Video } from '../../components/icons';
+import { useAuth } from '../../context/AuthContext';
+import { useChat } from '../../context/ChatContext';
+import { useWallet } from '../../context/WalletContext';
+import { useNotifications } from '../../context/NotificationContext';
+import { useCall } from '../../context/CallContext';
+import { Avatar } from '../../components/ui/Avatar';
+import { TipModal } from '../../components/modals/TipModal';
+import { formatDistanceToNow } from '../../utils/date';
+import type { Message } from '../../types';
+import { ToastContainer } from '../../components/ui/Toast';
+import { Navbar } from '../../components/layout/Navbar';
+
+export function ChatRoom() {
+	const { id: convId } = useParams<{ id: string }>();
+	const navigate = useNavigate();
+	const { state: authState } = useAuth();
+	const { state: chatState, sendMessage, markRead, unlockMessage } = useChat();
+	const { deductFunds } = useWallet();
+	const { showToast } = useNotifications();
+	const { startCall } = useCall();
+	const [text, setText] = useState('');
+	const [showTipModal, setShowTipModal] = useState(false);
+	const messagesEndRef = useRef<HTMLDivElement>(null);
+
+	const conv = chatState.conversations.find(c => c.id === convId);
+	const messages = convId ? (chatState.messages[convId] ?? []) : [];
+	const userId = authState.user?.id ?? '';
+
+	useEffect(() => {
+		if (convId) markRead(convId);
+	}, [convId, markRead]);
+
+	useEffect(() => {
+		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+	}, [messages]);
+
+	if (!conv || !convId) {
+		return (
+			<div className="min-h-screen bg-[#0d0d0d] flex items-center justify-center">
+				<p className="text-white/40">Conversation not found</p>
+			</div>
+		);
+	}
+
+	const otherIdx = conv.participantIds.indexOf(userId) === 0 ? 1 : 0;
+	const otherName = conv.participantNames[otherIdx];
+	const otherAvatar = conv.participantAvatars[otherIdx];
+	const otherId = conv.participantIds[otherIdx];
+
+	function handleSend(e: React.FormEvent) {
+		e.preventDefault();
+		if (!text.trim() || !authState.user) return;
+		const msg: Message = {
+			id: `msg-${Date.now()}`,
+			conversationId: convId!,
+			senderId: userId,
+			senderName: authState.user.name,
+			senderAvatar: authState.user.avatar,
+			content: text.trim(),
+			isPaid: false,
+			isUnlocked: true,
+			createdAt: new Date().toISOString(),
+			isSeen: false,
+		};
+		sendMessage(msg);
+		setText('');
+
+		setTimeout(() => {
+			const reply: Message = {
+				id: `msg-${Date.now()}-reply`,
+				conversationId: convId!,
+				senderId: otherId,
+				senderName: otherName,
+				senderAvatar: otherAvatar,
+				content: getAutoReply(),
+				isPaid: false,
+				isUnlocked: true,
+				createdAt: new Date().toISOString(),
+				isSeen: false,
+			};
+			sendMessage(reply);
+		}, 1500);
+	}
+
+	function handleUnlockMessage(msg: Message) {
+		if (!msg.price) return;
+		const ok = deductFunds(msg.price, 'ppv', `Unlock message from ${otherName}`, otherId, otherName);
+		if (ok) {
+			unlockMessage(msg.id, convId!);
+			showToast('Message unlocked!');
+		} else {
+			showToast('Insufficient balance', 'error');
+		}
+	}
+
+	const replies = [
+		'Thanks so much! Really appreciate the support 💕',
+		'That\'s amazing to hear! More content coming soon 🔥',
+		'You\'re the best! Let me know if you have any requests',
+		'Love connecting with my subscribers! Stay tuned for new stuff',
+		'Haha yes! That one took me forever to make 😄',
+	];
+	let replyIdx = 0;
+	function getAutoReply() {
+		const reply = replies[replyIdx % replies.length];
+		replyIdx++;
+		return reply;
+	}
+
+	return (
+		<div className="min-h-screen bg-[#0d0d0d] flex flex-col">
+			<Navbar />
+			<ToastContainer />
+
+			<div className="fixed top-14 left-0 right-0 z-30 bg-[#0d0d0d]/90 backdrop-blur-xl border-b border-white/5">
+				<div className="max-w-2xl mx-auto px-4 h-14 flex items-center gap-3">
+					<button onClick={() => navigate('/messages')} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
+						<ArrowLeft className="w-5 h-5 text-white/60" />
+					</button>
+					<Avatar src={otherAvatar} alt={otherName} size="md" isOnline={conv.isOnline} />
+					<div>
+						<p className="text-sm font-semibold text-white">{otherName}</p>
+						<p className="text-xs text-white/40">{conv.isOnline ? 'Online now' : 'Offline'}</p>
+					</div>
+					<div className="ml-auto flex items-center gap-2">
+						<button
+							onClick={() => { startCall(otherId, otherName, otherAvatar, 'audio'); navigate('/call'); }}
+							className="w-8 h-8 rounded-xl bg-white/8 hover:bg-emerald-500/20 hover:text-emerald-400 text-white/50 flex items-center justify-center transition-all"
+						>
+							<Phone className="w-4 h-4" />
+						</button>
+						<button
+							onClick={() => { startCall(otherId, otherName, otherAvatar, 'video'); navigate('/call'); }}
+							className="w-8 h-8 rounded-xl bg-white/8 hover:bg-sky-500/20 hover:text-sky-400 text-white/50 flex items-center justify-center transition-all"
+						>
+							<Video className="w-4 h-4" />
+						</button>
+						<button
+							onClick={() => setShowTipModal(true)}
+							className="flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-xs font-semibold px-3 py-1.5 rounded-xl transition-all"
+						>
+							<Zap className="w-3.5 h-3.5 fill-amber-400" />
+							Tip
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<div className="flex-1 pt-28 pb-20 overflow-y-auto">
+				<div className="max-w-2xl mx-auto px-4 space-y-3 py-4">
+					{messages.map(msg => {
+						const isMe = msg.senderId === userId;
+						return (
+							<div key={msg.id} className={`flex gap-2 ${isMe ? 'flex-row-reverse' : ''}`}>
+								{!isMe && <Avatar src={msg.senderAvatar} alt={msg.senderName} size="sm" className="mt-auto mb-1" />}
+								<div className={`max-w-[75%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+									{!msg.isUnlocked && msg.isPaid ? (
+										<div className={`rounded-2xl overflow-hidden border ${isMe ? 'border-white/10 bg-white/5' : 'border-rose-500/20 bg-rose-500/5'}`}>
+											<div className="px-4 py-3 flex items-center gap-2">
+												<Lock className="w-4 h-4 text-rose-400 shrink-0" />
+												<div className="flex-1">
+													<p className="text-xs text-white/60">Paid message — ${msg.price?.toFixed(2)}</p>
+													<p className="text-[10px] text-white/30">Click to unlock this exclusive message</p>
+												</div>
+												{!isMe && (
+													<button
+														onClick={() => handleUnlockMessage(msg)}
+														className="flex items-center gap-1 bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors shrink-0"
+													>
+														<Unlock className="w-3 h-3" />
+														Unlock
+													</button>
+												)}
+											</div>
+										</div>
+									) : (
+										<div className={`px-4 py-2.5 rounded-2xl text-sm ${
+											isMe ?
+												'bg-rose-500 text-white rounded-tr-sm' :
+												'bg-[#1e1e1e] text-white/80 rounded-tl-sm'
+										}`}
+										>
+											{msg.isUnlocked && msg.isPaid && (
+												<div className="flex items-center gap-1 text-xs mb-1 opacity-60">
+													<Unlock className="w-3 h-3" /> Unlocked content
+												</div>
+											)}
+											{msg.content}
+										</div>
+									)}
+									<div className={`flex items-center gap-1 ${isMe ? 'flex-row-reverse' : ''}`}>
+										<p className="text-[10px] text-white/20">{formatDistanceToNow(msg.createdAt)}</p>
+										{isMe && (
+											msg.isSeen ?
+												<CheckCheck className="w-3 h-3 text-rose-400" /> :
+												<Check className="w-3 h-3 text-white/20" />
+										)}
+									</div>
+								</div>
+							</div>
+						);
+					})}
+					<div ref={messagesEndRef} />
+				</div>
+			</div>
+
+			<div className="fixed bottom-0 left-0 right-0 bg-[#0d0d0d]/95 backdrop-blur-xl border-t border-white/5">
+				<div className="max-w-2xl mx-auto px-4 py-3">
+					<form onSubmit={handleSend} className="flex gap-2">
+						<button type="button" className="p-2.5 rounded-xl hover:bg-white/10 transition-colors text-white/40 hover:text-white/70">
+							<ImageIcon className="w-5 h-5" />
+						</button>
+						<input
+							value={text}
+							onChange={e => setText(e.target.value)}
+							placeholder="Type a message..."
+							className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-2.5 text-sm text-white placeholder-white/25 focus:outline-none focus:border-rose-500/30"
+						/>
+						<button
+							type="submit"
+							disabled={!text.trim()}
+							className="w-10 h-10 bg-rose-500 hover:bg-rose-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl flex items-center justify-center transition-all active:scale-95"
+						>
+							<Send className="w-4 h-4 text-white" />
+						</button>
+					</form>
+				</div>
+			</div>
+
+			<TipModal
+				isOpen={showTipModal}
+				onClose={() => setShowTipModal(false)}
+				creatorId={otherId}
+				creatorName={otherName}
+				creatorAvatar={otherAvatar}
+			/>
+		</div>
+	);
+}
