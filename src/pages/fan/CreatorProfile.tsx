@@ -14,6 +14,7 @@ import { useCall } from '../../context/CallContext';
 import { useSession } from '../../context/SessionContext';
 import { useWallet } from '../../context/WalletContext';
 import { SessionPickerModal } from '../../components/modals/SessionPickerModal';
+import type { SessionPayMode } from '../../components/modals/SessionPickerModal';
 import type { SessionType } from '../../types';
 
 export function CreatorProfile() {
@@ -21,11 +22,11 @@ export function CreatorProfile() {
 	const navigate = useNavigate();
 	const { state: authState } = useAuth();
 	const { state: contentState, isSubscribed } = useContent();
-	useNotifications();
+	const { showToast } = useNotifications();
 	const { addConversation, getConversationForUser } = useChat();
 	const { startCall } = useCall();
 	const { startSession } = useSession();
-	useWallet();
+	const { deductFunds, payViaRazorpay } = useWallet();
 	const [showTipModal, setShowTipModal] = useState(false);
 	const [showSubscribeModal, setShowSubscribeModal] = useState(false);
 	const [showSessionModal, setShowSessionModal] = useState(false);
@@ -55,8 +56,23 @@ export function CreatorProfile() {
 			return true;
 		});
 
-	function handleStartSession(type: SessionType, durationMinutes: number, _totalCost: number) {
+	async function handleStartSession(type: SessionType, durationMinutes: number, totalCost: number, payMode: SessionPayMode) {
 		if (!authState.user) return;
+
+		if (payMode === 'razorpay') {
+			const result = await payViaRazorpay(totalCost, 'session', `${type} session with ${creator.name} (${durationMinutes}min)`, creator.id, creator.name);
+			if (!result.ok) {
+				if (!result.cancelled) showToast(result.error || 'Payment failed.', 'error');
+				return;
+			}
+		} else {
+			const ok = deductFunds(totalCost, 'session', `Session with ${creator.name}`, creator.id, creator.name);
+			if (!ok) {
+				showToast('Insufficient wallet balance.', 'error');
+				return;
+			}
+		}
+
 		startSession(type, creator.id, creator.name, creator.avatar, authState.user.id, authState.user.name, durationMinutes, creator.perMinuteRate);
 		if (type === 'chat') {
 			navigate(`/session/chat/${creator.id}`);

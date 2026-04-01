@@ -5,6 +5,7 @@ import { Layout } from '../../components/layout/Layout';
 import { CreatorCard } from '../../components/ui/CreatorCard';
 import { mockCreators } from '../../data/users';
 import { useLiveStream } from '../../context/LiveStreamContext';
+import { useDragScroll } from '../../hooks/useDragScroll';
 
 const CATEGORIES = ['All', 'Fitness', 'Art', 'Tech', 'Travel', 'Music', 'Food', 'Gaming'];
 
@@ -15,6 +16,9 @@ export function Explore() {
 	const [sortBy, setSortBy] = useState<'popular' | 'new' | 'price'>('popular');
 	const { getLiveStreams } = useLiveStream();
 	const liveStreams = getLiveStreams();
+	const liveRef = useDragScroll<HTMLDivElement>();
+	const trendingRef = useDragScroll<HTMLDivElement>();
+	const allRef = useDragScroll<HTMLDivElement>();
 
 	const approvedCreators = mockCreators.filter(c => c.isKYCVerified);
 
@@ -73,8 +77,8 @@ export function Explore() {
 							</div>
 							<h2 className="font-semibold text-white text-sm">Live Now</h2>
 						</div>
-					<div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 mb-8">
-						{liveStreams.map(stream => (
+				<div ref={liveRef} className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 mb-8">
+					{liveStreams.map(stream => (
 							<button
 								key={stream.id}
 								onClick={() => navigate(`/live/${stream.id}`)}
@@ -111,8 +115,8 @@ export function Explore() {
 							<TrendingUp className="w-4 h-4 text-rose-400" />
 							<h2 className="font-semibold text-white text-sm">Trending Now</h2>
 						</div>
-					<div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4">
-						{trendingCreators.map((creator, idx) => (
+				<div ref={trendingRef} className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4">
+					{trendingCreators.map((creator, idx) => (
 							<div key={creator.id} className="relative flex-shrink-0 w-56 sm:w-64 md:w-72">
 								{idx === 0 && (
 									<div className="absolute -top-2 -right-2 z-10 bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5">
@@ -152,8 +156,8 @@ export function Explore() {
 						<p className="text-white/30">No creators found</p>
 					</div>
 				) : (
-					<div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4">
-						{filtered.map(creator => (
+				<div ref={allRef} className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4">
+					{filtered.map(creator => (
 							<div key={creator.id} className="flex-shrink-0 w-48 sm:w-56 md:w-64">
 								<CreatorCard creator={creator} />
 							</div>
