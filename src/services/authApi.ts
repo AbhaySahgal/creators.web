@@ -9,7 +9,7 @@ interface ExchangeResponse {
 }
 
 function isValidUser(value: unknown): value is User {
-	if (!value || typeof value !== 'object') return false;
+	if (typeof value !== 'object' || value === null) return false;
 	const candidate = value as Partial<User>;
 	return typeof candidate.id === 'string' &&
 		typeof candidate.email === 'string' &&
