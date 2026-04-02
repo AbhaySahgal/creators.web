@@ -8,6 +8,7 @@ import { useContent } from '../../context/ContentContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { usdToInr, formatINR } from '../../services/razorpay';
 import type { Post } from '../../types';
+import { delayMs } from '../../utils/delay';
 
 interface PPVUnlockModalProps {
 	isOpen: boolean;
@@ -31,9 +32,10 @@ export function PPVUnlockModal({ isOpen, onClose, post }: PPVUnlockModalProps) {
 	const balance = authState.user?.walletBalance ?? 0;
 	const inrPrice = usdToInr(price);
 
-	async function handleUnlock() {
+	function handleUnlock() {
 		if (!authState.user) return;
 		setIsLoading(true);
+		void delayMs(800).then(() => {
 		setError('');
 
 		let ok = false;
@@ -56,6 +58,7 @@ export function PPVUnlockModal({ isOpen, onClose, post }: PPVUnlockModalProps) {
 			setTimeout(onClose, 1500);
 		}
 		setIsLoading(false);
+  });
 	}
 
 	return (
@@ -130,7 +133,7 @@ export function PPVUnlockModal({ isOpen, onClose, post }: PPVUnlockModalProps) {
 							variant="primary"
 							fullWidth
 							isLoading={isLoading}
-							onClick={handleUnlock}
+							onClick={() => { void handleUnlock(); }}
 							disabled={payMode === 'wallet' && balance < price}
 						>
 							<Unlock className="w-4 h-4" />

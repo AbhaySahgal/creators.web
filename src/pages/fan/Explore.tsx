@@ -95,17 +95,12 @@ export function Explore() {
 										<Eye className="w-3 h-3 text-white/70" />
 										<span className="text-white text-[10px] font-semibold">{stream.viewerCount.toLocaleString()}</span>
 									</div>
-									<div className="absolute bottom-2 left-2 flex items-center gap-1.5">
-										<img src={stream.creatorAvatar} alt="" className="w-6 h-6 rounded-full object-cover border border-white/20" />
-										<span className="text-white text-xs font-semibold">{stream.creatorName}</span>
+									<div className="px-3 py-2.5">
+										<p className="text-white/70 text-xs truncate">{stream.title}</p>
 									</div>
-								</div>
-								<div className="px-3 py-2.5">
-									<p className="text-white/70 text-xs truncate">{stream.title}</p>
-								</div>
-							</button>
-						))}
-					</div>
+								</button>
+							))}
+						</div>
 					</div>
 				)}
 
