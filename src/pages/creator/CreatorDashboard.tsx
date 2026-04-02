@@ -1,6 +1,19 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, Users, Zap, DollarSign, ArrowRight, Star, Eye, Radio, MessageCircle, Phone, Video, Clock } from '../../components/icons';
+import {
+	TrendingUp,
+	Users,
+	Zap,
+	DollarSign,
+	ArrowRight,
+	Star,
+	Eye,
+	Radio,
+	MessageCircle,
+	Phone,
+	Video,
+	Clock,
+} from '../../components/icons';
 import { Layout } from '../../components/layout/Layout';
 import { useCurrentCreator } from '../../context/AuthContext';
 import { useContent } from '../../context/ContentContext';
