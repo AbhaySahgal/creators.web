@@ -2,6 +2,10 @@ import React, { createContext, useContext, useReducer, useCallback } from 'react
 import type { User, Creator } from '../types';
 import { mockCreators, mockFanUser, mockAdminUser, DEMO_ACCOUNTS } from '../data/users';
 import { delayMs } from '../utils/delay';
+import { signInWithPopup, signOut } from 'firebase/auth';
+import { isFirebaseConfigured, firebaseMissingConfigKeys } from '../config/firebase';
+import { getFirebaseAuth, getGoogleProvider } from '../lib/firebaseClient';
+import { exchangeFirebaseToken } from '../services/authApi';
 
 interface AuthState {
 	user: User | null;
@@ -58,6 +62,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 interface AuthContextValue {
 	state: AuthState;
 	login: (email: string, password: string) => Promise<boolean>;
+	loginWithGoogle: (role: 'fan' | 'creator') => Promise<User | null>;
 	logout: () => void;
 	verifyAge: () => void;
 	setPendingEmail: (email: string) => void;
@@ -97,7 +102,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		});
 	}, []);
 
+	const loginWithGoogle = useCallback((role: 'fan' | 'creator'): Promise<User | null> => {
+		dispatch({ type: 'CLEAR_ERROR' });
+		if (!isFirebaseConfigured) {
+			dispatch({
+				type: 'SET_ERROR',
+				payload: `Firebase is not configured. Missing: ${firebaseMissingConfigKeys.join(', ')}`,
+			});
+			return Promise.resolve(null);
+		}
+
+		return signInWithPopup(getFirebaseAuth(), getGoogleProvider())
+			.then(result => result.user.getIdToken().then(idToken => ({ firebaseUser: result.user, idToken })))
+			.then(({ firebaseUser, idToken }) =>
+				exchangeFirebaseToken(idToken, role).then(apiUser => ({ firebaseUser, apiUser }))
+			)
+			.then(({ firebaseUser, apiUser }) => {
+				const fallbackUser: User = {
+					id: firebaseUser.uid,
+					email: firebaseUser.email ?? '',
+					name: firebaseUser.displayName ?? 'New user',
+					username: (firebaseUser.email ?? `user_${firebaseUser.uid.slice(0, 6)}`).split('@')[0],
+					avatar: firebaseUser.photoURL ?? 'https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg',
+					role,
+					createdAt: new Date().toISOString(),
+					isAgeVerified: true,
+					status: 'active',
+					walletBalance: 0,
+				};
+
+				const user = apiUser ?? fallbackUser;
+				dispatch({ type: 'LOGIN', payload: user });
+				return user;
+			})
+			.catch(error => {
+				const errorMessage = error instanceof Error ? error.message : 'Google sign-in failed';
+				dispatch({ type: 'SET_ERROR', payload: errorMessage });
+				return null;
+			});
+	}, []);
+
 	const logout = useCallback(() => {
+		if (isFirebaseConfigured) {
+			void signOut(getFirebaseAuth()).finally(() => {
+				dispatch({ type: 'LOGOUT' });
+			});
+			return;
+		}
 		dispatch({ type: 'LOGOUT' });
 	}, []);
 
@@ -122,7 +173,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	}, []);
 
 	return (
-		<AuthContext.Provider value={{ state, login, logout, verifyAge, setPendingEmail, updateUser, updateWallet, clearError }}>
+		<AuthContext.Provider value={{
+			state,
+			login,
+			loginWithGoogle,
+			logout,
+			verifyAge,
+			setPendingEmail,
+			updateUser,
+			updateWallet,
+			clearError,
+		}}
+		>
 			{children}
 		</AuthContext.Provider>
 	);
@@ -137,5 +199,19 @@ export function useAuth() {
 export function useCurrentCreator(): Creator | null {
 	const { state } = useAuth();
 	if (!state.user || state.user.role !== 'creator') return null;
-	return mockCreators.find(c => c.id === state.user!.id) ?? null;
+	const currentUser = state.user;
+	const creatorMatch = mockCreators.find(c => c.id === currentUser.id);
+	if (creatorMatch) return creatorMatch;
+
+	return {
+		...mockCreators[0],
+		id: currentUser.id,
+		name: currentUser.name,
+		email: currentUser.email,
+		username: currentUser.username,
+		avatar: currentUser.avatar,
+		createdAt: currentUser.createdAt,
+		status: currentUser.status,
+		walletBalance: currentUser.walletBalance,
+	};
 }
