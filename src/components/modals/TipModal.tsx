@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useWallet } from '../../context/WalletContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { usdToInr, formatINR } from '../../services/razorpay';
+import { delayMs } from '../../utils/delay';
 
 const TIP_PRESETS = [3, 5, 10, 20, 50, 100];
 
@@ -34,9 +35,10 @@ export function TipModal({ isOpen, onClose, creatorId, creatorName, creatorAvata
 	const balance = authState.user?.walletBalance ?? 0;
 	const inrTip = usdToInr(tipAmount);
 
-	async function handleSendTip() {
+	function handleSendTip() {
 		if (!tipAmount || tipAmount <= 0) return;
 		setIsLoading(true);
+		void delayMs(800).then(() => {
 		setError('');
 
 		let ok = false;
@@ -58,6 +60,7 @@ export function TipModal({ isOpen, onClose, creatorId, creatorName, creatorAvata
 			setTimeout(onClose, 1500);
 		}
 		setIsLoading(false);
+		});
 	}
 
 	return (
@@ -140,7 +143,7 @@ export function TipModal({ isOpen, onClose, creatorId, creatorName, creatorAvata
 							variant="primary"
 							fullWidth
 							isLoading={isLoading}
-							onClick={handleSendTip}
+							onClick={() => { void handleSendTip(); }}
 							disabled={tipAmount <= 0 || (payMode === 'wallet' && balance < tipAmount)}
 							className="bg-amber-500 hover:bg-amber-600 shadow-amber-500/20"
 						>

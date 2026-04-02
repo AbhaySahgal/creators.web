@@ -8,6 +8,7 @@ import { useContent } from '../../context/ContentContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { usdToInr, formatINR } from '../../services/razorpay';
 import type { Creator } from '../../types';
+import { delayMs } from '../../utils/delay';
 
 interface SubscribeModalProps {
 	isOpen: boolean;
@@ -59,9 +60,10 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 		setTimeout(onClose, 2000);
 	}
 
-	async function handleSubscribe() {
+	function handleSubscribe() {
 		if (!authState.user) return;
 		setIsLoading(true);
+		void delayMs(900).then(() => {
 		setError('');
 
 		if (payMode === 'razorpay') {
@@ -166,7 +168,7 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 							variant="primary"
 							fullWidth
 							isLoading={isLoading}
-							onClick={handleSubscribe}
+							onClick={() => { void handleSubscribe(); }}
 							disabled={payMode === 'wallet' && balance < creator.subscriptionPrice}
 						>
 							Subscribe for ${creator.subscriptionPrice}/month
