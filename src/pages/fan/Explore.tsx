@@ -59,7 +59,7 @@ export function Explore() {
 								key={cat}
 								onClick={() => setCategory(cat)}
 								className={`shrink-0 text-sm px-3 py-1.5 rounded-xl font-medium transition-all ${category === cat ? 'bg-rose-500 text-white' : 'bg-white/5 text-white/50 hover:text-white hover:bg-white/10'
-									}`}
+								}`}
 							>
 								{cat}
 							</button>
