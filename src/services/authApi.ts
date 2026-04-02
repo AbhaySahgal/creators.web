@@ -10,7 +10,7 @@ interface ExchangeResponse {
 
 function isValidUser(value: unknown): value is User {
 	if (typeof value !== 'object' || value === null) return false;
-	const candidate = value as Partial<User>;
+	const candidate = value as Record<string, unknown>;
 	return typeof candidate.id === 'string' &&
 		typeof candidate.email === 'string' &&
 		typeof candidate.role === 'string' &&
