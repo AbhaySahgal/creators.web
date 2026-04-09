@@ -31,6 +31,21 @@ export interface MeResponse {
 	user: User | null;
 }
 
+export interface UpdateMyProfileRequest {
+	name?: string;
+	username?: string;
+	avatarAssetId?: string;
+	avatarUrl?: string;
+	bio?: string;
+	bannerAssetId?: string;
+	bannerUrl?: string;
+	category?: string;
+}
+
+export interface UpdateMyProfileResponse {
+	user: User;
+}
+
 export interface RazorpayCreateOrderRequest {
 	amountMinor: number;
 	currency?: 'INR';
@@ -161,6 +176,11 @@ export const creatorsApi = {
 				.finally(() => {
 					clearSessionToken();
 				});
+		},
+	},
+	me: {
+		updateProfile(body: UpdateMyProfileRequest): Promise<UpdateMyProfileResponse> {
+			return requestJson<UpdateMyProfileResponse>('/me/profile', { method: 'POST', body, auth: true });
 		},
 	},
 	payments: {
