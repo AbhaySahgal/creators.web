@@ -5,7 +5,7 @@ import { Layout } from '../components/layout/Layout';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
-import { delayMs } from '../utils/delay';
+import { ApiError, creatorsApi } from '../services/creatorsApi';
 
 export function Settings() {
 	const { state: authState, logout, updateUser } = useAuth();
@@ -29,11 +29,19 @@ export function Settings() {
 
 	function handleSaveProfile() {
 		setIsSaving(true);
-		void delayMs(700).then(() => {
-			updateUser({ name });
-			showToast('Profile updated!');
-			setIsSaving(false);
-		});
+		void creatorsApi.me.updateProfile({ name: name.trim() || undefined })
+			.then(({ user: updated }) => {
+				updateUser(updated);
+				showToast('Profile updated!');
+			})
+			.catch(err => {
+				if (err instanceof ApiError) {
+					showToast(`Save failed (HTTP ${err.status}).`, 'error');
+					return;
+				}
+				showToast('Save failed.', 'error');
+			})
+			.finally(() => setIsSaving(false));
 	}
 
 	function handleChangePassword() {
