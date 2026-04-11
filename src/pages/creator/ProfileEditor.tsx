@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, Save } from '../../components/icons';
 import { Layout } from '../../components/layout/Layout';
 import { Button } from '../../components/ui/Button';
@@ -27,10 +27,38 @@ export function ProfileEditor() {
 	const [avatarUrl, setAvatarUrl] = useState(isNewGoogleCreator && currentUser ? currentUser.avatar : creatorData.avatar);
 	const [bannerUrl, setBannerUrl] = useState(creatorData.banner);
 	const [isSaving, setIsSaving] = useState(false);
+	const [avatarFile, setAvatarFile] = useState<File | null>(null);
+	const [bannerFile, setBannerFile] = useState<File | null>(null);
+
+	const avatarInputRef = useRef<HTMLInputElement | null>(null);
+	const bannerInputRef = useRef<HTMLInputElement | null>(null);
+
+	const avatarPreviewUrl = useMemo(() => {
+		if (!avatarFile) return null;
+		return URL.createObjectURL(avatarFile);
+	}, [avatarFile]);
+
+	const bannerPreviewUrl = useMemo(() => {
+		if (!bannerFile) return null;
+		return URL.createObjectURL(bannerFile);
+	}, [bannerFile]);
+
+	useEffect(() => {
+		return () => {
+			if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
+		};
+	}, [avatarPreviewUrl]);
+
+	useEffect(() => {
+		return () => {
+			if (bannerPreviewUrl) URL.revokeObjectURL(bannerPreviewUrl);
+		};
+	}, [bannerPreviewUrl]);
 
 	const CATEGORIES = ['Fitness', 'Art', 'Tech', 'Travel', 'Music', 'Food', 'Gaming', 'Lifestyle'];
 
 	function handleSave() {
+		if (isSaving) return;
 		setIsSaving(true);
 		void delayMs(800).then(() => {
 			const parsedPrice = Math.max(1, parseFloat(price) || 0);
@@ -73,6 +101,16 @@ export function ProfileEditor() {
 								Change Banner
 							</div>
 						</button>
+						<input
+							ref={bannerInputRef}
+							type="file"
+							accept="image/*"
+							className="hidden"
+							onChange={e => {
+								const f = e.target.files?.[0] ?? null;
+								setBannerFile(f);
+							}}
+						/>
 					</div>
 
 					<div className="absolute -bottom-6 left-4">
@@ -81,6 +119,16 @@ export function ProfileEditor() {
 							<button className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl opacity-0 hover:opacity-100 transition-opacity">
 								<Camera className="w-4 h-4 text-white" />
 							</button>
+							<input
+								ref={avatarInputRef}
+								type="file"
+								accept="image/*"
+								className="hidden"
+								onChange={e => {
+									const f = e.target.files?.[0] ?? null;
+									setAvatarFile(f);
+								}}
+							/>
 						</div>
 					</div>
 				</div>
@@ -100,7 +148,16 @@ export function ProfileEditor() {
 						<input
 							value={name}
 							onChange={e => setName(e.target.value)}
-							className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-rose-500/50"
+							className="w-full bg-input border border-border/20 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring/40"
+						/>
+					</div>
+
+					<div>
+						<label className="block text-sm font-medium text-muted mb-1.5">Username</label>
+						<input
+							value={username}
+							onChange={e => setUsername(e.target.value)}
+							className="w-full bg-input border border-border/20 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring/40"
 						/>
 					</div>
 
@@ -139,19 +196,19 @@ export function ProfileEditor() {
 							value={bio}
 							onChange={e => setBio(e.target.value)}
 							rows={4}
-							className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-rose-500/50 resize-none"
+							className="w-full bg-input border border-border/20 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring/40 resize-none"
 						/>
 					</div>
 
 					<div>
-						<label className="block text-sm font-medium text-white/60 mb-1.5">Category</label>
+						<label className="block text-sm font-medium text-muted mb-1.5">Category</label>
 						<div className="grid grid-cols-4 gap-2">
 							{CATEGORIES.map(cat => (
 								<button
 									key={cat}
 									onClick={() => setCategory(cat)}
 									className={`py-2 rounded-xl text-xs font-medium transition-all ${
-										category === cat ? 'bg-rose-500 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'
+										category === cat ? 'bg-rose-500 text-white' : 'bg-foreground/5 text-muted hover:bg-foreground/10'
 									}`}
 								>
 									{cat}
@@ -161,19 +218,19 @@ export function ProfileEditor() {
 					</div>
 
 					<div>
-						<label className="block text-sm font-medium text-white/60 mb-1.5">Subscription Price ($/month)</label>
+						<label className="block text-sm font-medium text-muted mb-1.5">Subscription Price ($/month)</label>
 						<div className="relative">
-							<span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40">$</span>
+							<span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted">$</span>
 							<input
 								type="number"
 								value={price}
 								onChange={e => setPrice(e.target.value)}
 								min="1"
 								step="0.99"
-								className="w-full bg-white/5 border border-white/10 rounded-xl pl-8 pr-4 py-3 text-sm text-white focus:outline-none focus:border-rose-500/50"
+								className="w-full bg-input border border-border/20 rounded-xl pl-8 pr-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring/40"
 							/>
 						</div>
-						<p className="text-xs text-white/30 mt-1">Platform fee 20%. You receive ${((parseFloat(price) || 0) * 0.8).toFixed(2)} per subscriber.</p>
+						<p className="text-xs text-muted/80 mt-1">Platform fee 20%. You receive ${((parseFloat(price) || 0) * 0.8).toFixed(2)} per subscriber.</p>
 					</div>
 
 					<Button variant="primary" fullWidth isLoading={isSaving} onClick={() => { void handleSave(); }} leftIcon={<Save className="w-4 h-4" />}>

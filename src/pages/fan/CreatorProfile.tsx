@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Star, Grid3x3, MessageCircle, Zap, Share2, MoreHorizontal, Lock, Image, Type, Phone, Video, ArrowLeft } from '../../components/icons';
 import { Layout } from '../../components/layout/Layout';
@@ -14,7 +14,8 @@ import { useCall } from '../../context/CallContext';
 import { useSession } from '../../context/SessionContext';
 import { useWallet } from '../../context/WalletContext';
 import { SessionPickerModal, type SessionPayMode } from '../../components/modals/SessionPickerModal';
-import type { SessionType } from '../../types';
+import type { Creator, SessionType } from '../../types';
+import { creatorsApi } from '../../services/creatorsApi';
 
 export function CreatorProfile() {
 	const { id } = useParams<{ id: string }>();
@@ -30,25 +31,87 @@ export function CreatorProfile() {
 	const [showSubscribeModal, setShowSubscribeModal] = useState(false);
 	const [showSessionModal, setShowSessionModal] = useState(false);
 	const [postFilter, setPostFilter] = useState<'all' | 'free' | 'locked'>('all');
+	const [remoteCreator, setRemoteCreator] = useState<Creator | null>(null);
+	const [isLoadingCreator, setIsLoadingCreator] = useState(false);
 
-	const maybeCreator = mockCreators.find(c => c.id === id);
+	const maybeCreator = useMemo(() => mockCreators.find(c => c.id === id), [id]);
 
-	if (!maybeCreator) {
+	useEffect(() => {
+		if (!id) return;
+		const ac = new AbortController();
+		setIsLoadingCreator(true);
+		void creatorsApi.creators.getById(id, ac.signal)
+			.then(data => {
+				// Map minimal API user->Creator by merging with mock defaults.
+				const base = maybeCreator ?? mockCreators[0];
+				const mapped: Creator = {
+					...base,
+					id: data.id,
+					email: data.email,
+					name: data.name,
+					username: data.username,
+					avatar: data.avatar,
+					bio: data.bio ?? base.bio,
+					banner: data.banner ?? base.banner,
+					category: data.category ?? base.category,
+				};
+				setRemoteCreator(mapped);
+			})
+			.catch(() => {
+				// Keep mock fallback if API is unavailable.
+				setRemoteCreator(null);
+			})
+			.finally(() => setIsLoadingCreator(false));
+
+		return () => ac.abort();
+	}, [id, maybeCreator]);
+
+	if (!id) {
 		return (
 			<Layout>
 				<div className="flex items-center justify-center min-h-[50vh]">
-					<p className="text-white/40">Creator not found</p>
+					<p className="text-muted">Creator not found</p>
 				</div>
 			</Layout>
 		);
 	}
 
-	const creator = maybeCreator;
+	const creator = remoteCreator ?? maybeCreator ?? null;
+
+	if (!creator && !isLoadingCreator) {
+		return (
+			<Layout>
+				<div className="flex items-center justify-center min-h-[50vh]">
+					<p className="text-muted">Creator not found</p>
+				</div>
+			</Layout>
+		);
+	}
+
+	if (!creator) {
+		return (
+			<Layout>
+				<div className="flex items-center justify-center min-h-[50vh]">
+					<p className="text-muted">Loading creator…</p>
+				</div>
+			</Layout>
+		);
+	}
+
 	const subscribed = isSubscribed(creator.id);
 	const isOwner = authState.user?.id === creator.id;
+	const creatorForDisplay: Creator = isOwner && authState.user ? {
+		...creator,
+		name: authState.user.name,
+		username: authState.user.username,
+		avatar: authState.user.avatar,
+		bio: authState.user.bio ?? creator.bio,
+		banner: authState.user.banner ?? creator.banner,
+		category: authState.user.category ?? creator.category,
+	} : creator;
 
 	const creatorPosts = contentState.posts
-		.filter(p => p.creatorId === creator.id)
+		.filter(p => p.creatorId === creatorForDisplay.id)
 		.filter(p => {
 			if (postFilter === 'free') return !p.isLocked;
 			if (postFilter === 'locked') return p.isLocked;
@@ -60,25 +123,26 @@ export function CreatorProfile() {
 
 		const userId = authState.user.id;
 		const userName = authState.user.name;
+		const c = creatorForDisplay;
 
 		const startAndNavigate = () => {
 			startSession(
 				type,
-				creator.id,
-				creator.name,
-				creator.avatar,
+				c.id,
+				c.name,
+				c.avatar,
 				userId,
 				userName,
 				durationMinutes,
-				creator.perMinuteRate
+				c.perMinuteRate
 			);
 
 			if (type === 'chat') {
-				void navigate(`/session/chat/${creator.id}`);
+				void navigate(`/session/chat/${c.id}`);
 				return;
 			}
 
-			startCall(creator.id, creator.name, creator.avatar, type);
+			startCall(c.id, c.name, c.avatar, type);
 			void navigate('/call');
 		};
 
@@ -86,9 +150,9 @@ export function CreatorProfile() {
 			void payViaRazorpay(
 				totalCost,
 				'session',
-				`${type} session with ${creator.name} (${durationMinutes}min)`,
-				creator.id,
-				creator.name
+				`${type} session with ${c.name} (${durationMinutes}min)`,
+				c.id,
+				c.name
 			).then(result => {
 				if (!result.ok) {
 					if (!result.cancelled) showToast(result.error || 'Payment failed.', 'error');
@@ -100,7 +164,7 @@ export function CreatorProfile() {
 			return;
 		}
 
-		const ok = deductFunds(totalCost, 'session', `Session with ${creator.name}`, creator.id, creator.name);
+		const ok = deductFunds(totalCost, 'session', `Session with ${c.name}`, c.id, c.name);
 		if (!ok) {
 			showToast('Insufficient wallet balance.', 'error');
 			return;
@@ -111,20 +175,21 @@ export function CreatorProfile() {
 
 	function handleMessage() {
 		if (!authState.user) { navigate('/login'); return; }
-		const existing = getConversationForUser(creator.id);
+		const c = creatorForDisplay;
+		const existing = getConversationForUser(c.id);
 		if (existing) {
 			navigate(`/messages/${existing.id}`);
 		} else {
 			const convId = `conv-${Date.now()}`;
 			addConversation({
 				id: convId,
-				participantIds: [authState.user.id, creator.id],
-				participantNames: [authState.user.name, creator.name],
-				participantAvatars: [authState.user.avatar, creator.avatar],
+				participantIds: [authState.user.id, c.id],
+				participantNames: [authState.user.name, c.name],
+				participantAvatars: [authState.user.avatar, c.avatar],
 				lastMessage: '',
 				lastMessageTime: new Date().toISOString(),
 				unreadCount: 0,
-				isOnline: creator.isOnline,
+				isOnline: c.isOnline,
 			});
 			navigate(`/messages/${convId}`);
 		}
@@ -135,8 +200,8 @@ export function CreatorProfile() {
 			<div className="max-w-2xl mx-auto">
 				<div className="relative z-0">
 					<div className="h-40 sm:h-52">
-						<img src={creator.banner} alt="" className="w-full h-full object-cover" />
-						<div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#0d0d0d]" />
+						<img src={creatorForDisplay.banner} alt="" className="w-full h-full object-cover" />
+						<div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
 					</div>
 
 					<div className="absolute top-3 left-3 z-20">
@@ -164,12 +229,12 @@ export function CreatorProfile() {
 					<div className="flex items-end justify-between mb-3">
 						<div className="relative">
 							<img
-								src={creator.avatar}
-								alt={creator.name}
-								className="w-20 h-20 rounded-2xl border-4 border-[#0d0d0d] object-cover"
+								src={creatorForDisplay.avatar}
+								alt={creatorForDisplay.name}
+								className="w-20 h-20 rounded-2xl border-4 border-background object-cover"
 							/>
-							{creator.isOnline && (
-								<div className="absolute bottom-1 right-1 w-3.5 h-3.5 bg-emerald-400 border-2 border-[#0d0d0d] rounded-full" />
+							{creatorForDisplay.isOnline && (
+								<div className="absolute bottom-1 right-1 w-3.5 h-3.5 bg-emerald-400 border-2 border-background rounded-full" />
 							)}
 						</div>
 
@@ -178,20 +243,20 @@ export function CreatorProfile() {
 								{subscribed ? (
 									<>
 										<button
-											onClick={() => { startCall(creator.id, creator.name, creator.avatar, 'audio'); navigate('/call'); }}
-											className="w-9 h-9 bg-white/10 hover:bg-emerald-500/20 hover:text-emerald-400 text-white/70 rounded-xl flex items-center justify-center transition-all"
+											onClick={() => { startCall(creatorForDisplay.id, creatorForDisplay.name, creatorForDisplay.avatar, 'audio'); navigate('/call'); }}
+											className="w-9 h-9 bg-foreground/10 hover:bg-emerald-500/20 hover:text-emerald-400 text-muted rounded-xl flex items-center justify-center transition-all"
 										>
 											<Phone className="w-4 h-4" />
 										</button>
 										<button
-											onClick={() => { startCall(creator.id, creator.name, creator.avatar, 'video'); navigate('/call'); }}
-											className="w-9 h-9 bg-white/10 hover:bg-sky-500/20 hover:text-sky-400 text-white/70 rounded-xl flex items-center justify-center transition-all"
+											onClick={() => { startCall(creatorForDisplay.id, creatorForDisplay.name, creatorForDisplay.avatar, 'video'); navigate('/call'); }}
+											className="w-9 h-9 bg-foreground/10 hover:bg-sky-500/20 hover:text-sky-400 text-muted rounded-xl flex items-center justify-center transition-all"
 										>
 											<Video className="w-4 h-4" />
 										</button>
 										<button
 											onClick={handleMessage}
-											className="flex items-center gap-1.5 bg-white/10 hover:bg-white/15 text-white text-sm font-semibold px-3 py-2 rounded-xl transition-all"
+											className="flex items-center gap-1.5 bg-foreground/10 hover:bg-foreground/15 text-foreground text-sm font-semibold px-3 py-2 rounded-xl transition-all"
 										>
 											<MessageCircle className="w-4 h-4" />
 											Message
@@ -215,7 +280,7 @@ export function CreatorProfile() {
 										onClick={() => setShowSubscribeModal(true)}
 										className="bg-rose-500 hover:bg-rose-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all active:scale-95 shadow-lg shadow-rose-500/25"
 									>
-										Subscribe ${creator.subscriptionPrice}/mo
+										Subscribe ${creatorForDisplay.subscriptionPrice}/mo
 									</button>
 								)}
 							</div>
@@ -224,7 +289,7 @@ export function CreatorProfile() {
 						{isOwner && (
 							<button
 								onClick={() => { void navigate('/creator-dashboard/profile'); }}
-								className="bg-white/10 hover:bg-white/15 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-all mt-4"
+								className="bg-foreground/10 hover:bg-foreground/15 text-foreground text-sm font-semibold px-4 py-2 rounded-xl transition-all mt-4"
 							>
 								Edit Profile
 							</button>
@@ -232,23 +297,23 @@ export function CreatorProfile() {
 					</div>
 
 					<div className="flex items-center gap-2 mb-1">
-						<h1 className="text-xl font-bold text-white">{creator.name}</h1>
-						{creator.isKYCVerified && <Star className="w-5 h-5 text-amber-400 fill-amber-400" />}
+						<h1 className="text-xl font-bold text-white">{creatorForDisplay.name}</h1>
+						{creatorForDisplay.isKYCVerified && <Star className="w-5 h-5 text-amber-400 fill-amber-400" />}
 					</div>
-					<p className="text-white/40 text-sm mb-2">@{creator.username}</p>
-					{creator.bio && <p className="text-white/60 text-sm leading-relaxed mb-4">{creator.bio}</p>}
+					<p className="text-white/40 text-sm mb-2">@{creatorForDisplay.username}</p>
+					{creatorForDisplay.bio && <p className="text-white/60 text-sm leading-relaxed mb-4">{creatorForDisplay.bio}</p>}
 
 					<div className="flex gap-4 mb-4">
 						<div className="text-center">
-							<p className="font-bold text-white">{creator.postCount}</p>
-							<p className="text-xs text-white/40">Posts</p>
+							<p className="font-bold text-foreground">{creator.postCount}</p>
+							<p className="text-xs text-muted">Posts</p>
 						</div>
 						<div className="text-center">
-							<p className="font-bold text-white">{creator.subscriberCount.toLocaleString()}</p>
+							<p className="font-bold text-white">{creatorForDisplay.subscriberCount.toLocaleString()}</p>
 							<p className="text-xs text-white/40">Subscribers</p>
 						</div>
 						<div className="text-center">
-							<p className="font-bold text-white">{creator.likeCount.toLocaleString()}</p>
+							<p className="font-bold text-white">{creatorForDisplay.likeCount.toLocaleString()}</p>
 							<p className="text-xs text-white/40">Likes</p>
 						</div>
 					</div>
@@ -261,7 +326,7 @@ export function CreatorProfile() {
 								</div>
 								<div className="flex-1">
 									<p className="text-sm font-semibold text-white mb-0.5">Subscribe to unlock all content</p>
-									<p className="text-xs text-white/40">{creator.postCount} posts · Starting at ${creator.subscriptionPrice}/mo</p>
+									<p className="text-xs text-white/40">{creatorForDisplay.postCount} posts · Starting at ${creatorForDisplay.subscriptionPrice}/mo</p>
 								</div>
 								<button
 									onClick={() => setShowSubscribeModal(true)}
@@ -273,7 +338,7 @@ export function CreatorProfile() {
 						</div>
 					)}
 
-					<div className="flex gap-1 bg-white/5 p-0.5 rounded-xl mb-4">
+					<div className="flex gap-1 bg-foreground/5 p-0.5 rounded-xl mb-4">
 						{[
 							{ key: 'all', icon: Grid3x3, label: 'All' },
 							{ key: 'free', icon: Image, label: 'Free' },
@@ -283,7 +348,7 @@ export function CreatorProfile() {
 								key={key}
 								onClick={() => setPostFilter(key as typeof postFilter)}
 								className={`flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5 rounded-lg transition-all ${
-									postFilter === key ? 'bg-white/10 text-white' : 'text-white/40'
+									postFilter === key ? 'bg-foreground/10 text-foreground' : 'text-muted'
 								}`}
 							>
 								<Icon className="w-3.5 h-3.5" />
@@ -296,8 +361,8 @@ export function CreatorProfile() {
 				<div className="px-4 pb-8 space-y-4">
 					{creatorPosts.length === 0 ? (
 						<div className="text-center py-10">
-							<Type className="w-8 h-8 text-white/10 mx-auto mb-2" />
-							<p className="text-white/30 text-sm">No posts found</p>
+							<Type className="w-8 h-8 text-muted/50 mx-auto mb-2" />
+							<p className="text-muted text-sm">No posts found</p>
 						</div>
 					) : (
 						creatorPosts.map(post => (
@@ -310,21 +375,21 @@ export function CreatorProfile() {
 			<TipModal
 				isOpen={showTipModal}
 				onClose={() => setShowTipModal(false)}
-				creatorId={creator.id}
-				creatorName={creator.name}
-				creatorAvatar={creator.avatar}
+				creatorId={creatorForDisplay.id}
+				creatorName={creatorForDisplay.name}
+				creatorAvatar={creatorForDisplay.avatar}
 			/>
 			<SubscribeModal
 				isOpen={showSubscribeModal}
 				onClose={() => setShowSubscribeModal(false)}
-				creator={creator}
+				creator={creatorForDisplay}
 			/>
 			<SessionPickerModal
 				isOpen={showSessionModal}
 				onClose={() => setShowSessionModal(false)}
-				creatorName={creator.name}
-				creatorAvatar={creator.avatar}
-				ratePerMinute={creator.perMinuteRate}
+				creatorName={creatorForDisplay.name}
+				creatorAvatar={creatorForDisplay.avatar}
+				ratePerMinute={creatorForDisplay.perMinuteRate}
 				walletBalance={authState.user?.walletBalance ?? 0}
 				onConfirm={handleStartSession}
 			/>
