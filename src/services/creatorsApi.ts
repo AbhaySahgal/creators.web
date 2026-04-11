@@ -3,6 +3,12 @@ import { clearSessionToken, getSessionToken, setSessionToken } from './sessionTo
 
 export type PreferredRole = 'fan' | 'creator';
 export type UploadKind = 'post_image' | 'post_video' | 'avatar' | 'banner' | 'kyc_doc';
+export type CreatorProfileResponse = User & {
+	role: 'creator',
+	bio?: string,
+	banner?: string,
+	category?: string,
+};
 
 export interface RegisterRequest {
 	email: string;
@@ -29,6 +35,21 @@ export interface FirebaseExchangeResponse {
 
 export interface MeResponse {
 	user: User | null;
+}
+
+export interface UpdateMyProfileRequest {
+	name?: string;
+	username?: string;
+	avatarAssetId?: string;
+	avatarUrl?: string;
+	bio?: string;
+	bannerAssetId?: string;
+	bannerUrl?: string;
+	category?: string;
+}
+
+export interface UpdateMyProfileResponse {
+	user: User;
 }
 
 export interface RazorpayCreateOrderRequest {
@@ -163,6 +184,11 @@ export const creatorsApi = {
 				});
 		},
 	},
+	me: {
+		updateProfile(body: UpdateMyProfileRequest): Promise<UpdateMyProfileResponse> {
+			return requestJson<UpdateMyProfileResponse>('/me/profile', { method: 'POST', body, auth: true });
+		},
+	},
 	payments: {
 		razorpayCreateOrder(body: RazorpayCreateOrderRequest): Promise<RazorpayCreateOrderResponse> {
 			return requestJson<RazorpayCreateOrderResponse>('/payments/razorpay/orders', { method: 'POST', body, auth: true });
@@ -177,6 +203,13 @@ export const creatorsApi = {
 		},
 		complete(body: MediaCompleteRequest): Promise<MediaCompleteResponse> {
 			return requestJson<MediaCompleteResponse>('/media/complete', { method: 'POST', body, auth: true });
+		},
+	},
+	creators: {
+		// Note: backend route assumed as /creators/:id. If your API uses a different path,
+		// adjust here and the UI will follow.
+		getById(id: string, signal?: AbortSignal): Promise<CreatorProfileResponse> {
+			return requestJson<CreatorProfileResponse>(`/creators/${encodeURIComponent(id)}`, { method: 'GET', signal });
 		},
 	},
 };
