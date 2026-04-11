@@ -146,6 +146,31 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function normalizeUsername(input: string): string {
+	return input
+		.toLowerCase()
+		.replace(/[^a-z0-9]/g, '')
+		.slice(0, 20) || 'user';
+}
+
+function _createFallbackGoogleUser(firebaseUser: FirebaseUser, preferredRole: 'fan' | 'creator'): User {
+	const email = firebaseUser.email ?? '';
+	const displayName = firebaseUser.displayName?.trim() || email.split('@')[0] || 'New User';
+
+	return {
+		id: `google-${firebaseUser.uid}`,
+		email,
+		name: displayName,
+		username: normalizeUsername(displayName || email),
+		avatar: firebaseUser.photoURL ?? 'https://images.pexels.com/photos/1040880/pexels-photo-1040880.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop',
+		role: preferredRole,
+		createdAt: new Date().toISOString(),
+		isAgeVerified: true,
+		status: 'active',
+		walletBalance: 0,
+	};
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [state, dispatch] = useReducer(authReducer, initialState);
 	const didBootstrapRef = useRef(false);

@@ -5,6 +5,8 @@ import { Button } from '../../components/ui/Button';
 import { useAuth, useCurrentCreator } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { mockCreators } from '../../data/users';
+import { ApiError, creatorsApi } from '../../services/creatorsApi';
+import { uploadMediaAsset } from '../../services/mediaUpload';
 import { delayMs } from '../../utils/delay';
 
 export function ProfileEditor() {
