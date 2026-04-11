@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useReducer, useCallback, useEffect, useRef } from 'react';
+import { signInWithPopup, signOut, signOut as firebaseSignOut } from 'firebase/auth';
 import type { User, Creator } from '../types';
 import { mockCreators, mockFanUser, mockAdminUser, DEMO_ACCOUNTS } from '../data/users';
 import { delayMs } from '../utils/delay';
-import { signInWithPopup, signOut } from 'firebase/auth';
 import { isFirebaseConfigured, firebaseMissingConfigKeys } from '../config/firebase';
 import { getFirebaseAuth, getGoogleProvider } from '../lib/firebaseClient';
 import { exchangeFirebaseToken } from '../services/authApi';
@@ -15,6 +15,7 @@ interface AuthState {
 	isAgeVerified: boolean;
 	pendingEmail: string;
 	loginError: string;
+	creatorProfiles: Record<string, Creator>;
 }
 
 type AuthAction =
@@ -25,7 +26,8 @@ type AuthAction =
 	{ type: 'SET_ERROR', payload: string } |
 	{ type: 'CLEAR_ERROR' } |
 	{ type: 'UPDATE_USER', payload: Partial<User> } |
-	{ type: 'UPDATE_WALLET', payload: number };
+	{ type: 'UPDATE_WALLET', payload: number } |
+	{ type: 'UPDATE_CREATOR_PROFILE', payload: Partial<Creator> };
 
 const initialState: AuthState = {
 	user: null,
@@ -33,7 +35,39 @@ const initialState: AuthState = {
 	isAgeVerified: false,
 	pendingEmail: '',
 	loginError: '',
+	creatorProfiles: {},
 };
+
+function createCreatorProfileFromUser(user: User): Creator {
+	return {
+		id: user.id,
+		email: user.email,
+		name: user.name,
+		username: user.username,
+		avatar: user.avatar,
+		role: 'creator',
+		createdAt: user.createdAt,
+		isAgeVerified: user.isAgeVerified,
+		status: user.status,
+		walletBalance: user.walletBalance,
+		bio: 'Tell fans about your content and what they can expect.',
+		banner: 'https://images.pexels.com/photos/3756766/pexels-photo-3756766.jpeg?auto=compress&cs=tinysrgb&w=1200&h=400&fit=crop',
+		subscriptionPrice: 9.99,
+		totalEarnings: 0,
+		monthlyEarnings: 0,
+		tipsReceived: 0,
+		subscriberCount: 0,
+		kycStatus: 'not_submitted',
+		isKYCVerified: false,
+		category: 'Lifestyle',
+		isOnline: false,
+		postCount: 0,
+		likeCount: 0,
+		monthlyStats: [],
+		perMinuteRate: 2.99,
+		liveStreamEnabled: false,
+	};
+}
 
 function authReducer(state: AuthState, action: AuthAction): AuthState {
 	switch (action.type) {
@@ -50,11 +84,46 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 		case 'CLEAR_ERROR':
 			return { ...state, loginError: '' };
 		case 'UPDATE_USER':
-			return { ...state, user: state.user ? { ...state.user, ...action.payload } : null };
+			if (!state.user) return state;
+			return {
+				...state,
+				user: { ...state.user, ...action.payload },
+				creatorProfiles: state.user.role === 'creator' && state.creatorProfiles[state.user.id] ?
+					{
+						...state.creatorProfiles,
+						[state.user.id]: {
+							...state.creatorProfiles[state.user.id],
+							...action.payload,
+						},
+					} :
+					state.creatorProfiles,
+			};
 		case 'UPDATE_WALLET':
 			return {
 				...state,
 				user: state.user ? { ...state.user, walletBalance: action.payload } : null,
+				creatorProfiles: state.user?.role === 'creator' && state.creatorProfiles[state.user.id] ?
+					{
+						...state.creatorProfiles,
+						[state.user.id]: {
+							...state.creatorProfiles[state.user.id],
+							walletBalance: action.payload,
+						},
+					} :
+					state.creatorProfiles,
+			};
+		case 'UPDATE_CREATOR_PROFILE':
+			if (!state.user || state.user.role !== 'creator') return state;
+			return {
+				...state,
+				creatorProfiles: {
+					...state.creatorProfiles,
+					[state.user.id]: {
+						...(state.creatorProfiles[state.user.id] ?? createCreatorProfileFromUser(state.user)),
+						...action.payload,
+						id: state.user.id,
+					},
+				},
 			};
 		default:
 			return state;
@@ -70,6 +139,7 @@ interface AuthContextValue {
 	verifyAge: () => void;
 	setPendingEmail: (email: string) => void;
 	updateUser: (data: Partial<User>) => void;
+	updateCreatorProfile: (data: Partial<Creator>) => void;
 	updateWallet: (amount: number) => void;
 	clearError: () => void;
 }
@@ -221,6 +291,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			return;
 		}
 		dispatch({ type: 'LOGOUT' });
+
+		if (!isFirebaseConfigured) return;
+		void firebaseSignOut(getFirebaseAuth()).catch(() => {
+			// Keep logout resilient even if Firebase session clear fails.
+		});
 	}, []);
 
 	const verifyAge = useCallback(() => {
@@ -233,6 +308,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 	const updateUser = useCallback((data: Partial<User>) => {
 		dispatch({ type: 'UPDATE_USER', payload: data });
+	}, []);
+
+	const updateCreatorProfile = useCallback((data: Partial<Creator>) => {
+		dispatch({ type: 'UPDATE_CREATOR_PROFILE', payload: data });
 	}, []);
 
 	const updateWallet = useCallback((amount: number) => {
@@ -253,6 +332,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			verifyAge,
 			setPendingEmail,
 			updateUser,
+			updateCreatorProfile,
 			updateWallet,
 			clearError,
 		}}
