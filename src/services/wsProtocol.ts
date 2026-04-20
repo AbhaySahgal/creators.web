@@ -39,8 +39,8 @@ export function parseFrame(raw: string): WsFrame | null {
 }
 
 export function formatServiceLine(service: string, requestId?: string): string {
-	// Backend line protocol expects a space after '>' (e.g. `> chat r1`, `> call r1`).
-	return requestId ? `> ${service} ${requestId}` : `> ${service}`;
+	const s = service.trim();
+	return requestId ? `> ${s} ${requestId}` : `> ${s}`;
 }
 
 export function formatCommandLine(command: string, args: string[] = []): string {

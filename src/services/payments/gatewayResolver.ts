@@ -1,14 +1,19 @@
-import { creatorsApi, type PaymentGatewayResponse } from '../creatorsApi';
+import { creatorsApi } from '../creatorsApi';
 import type { PaymentProviderId } from './config';
 
-let cache: PaymentGatewayResponse | null = null;
-let inflight: Promise<PaymentGatewayResponse> | null = null;
+export type ResolvedPaymentGateway = {
+	provider: PaymentProviderId,
+	useMock: boolean,
+};
+
+let cache: ResolvedPaymentGateway | null = null;
+let inflight: Promise<ResolvedPaymentGateway> | null = null;
 
 function normalizeProvider(p: string | undefined): PaymentProviderId {
 	return p?.trim().toLowerCase() === 'stripe' ? 'stripe' : 'razorpay';
 }
 
-function envFallback(): PaymentGatewayResponse {
+function envFallback(): ResolvedPaymentGateway {
 	return {
 		provider: normalizeProvider(import.meta.env.VITE_PAYMENTS_PROVIDER),
 		useMock: import.meta.env.VITE_PAYMENTS_MOCK === 'true',
@@ -24,17 +29,16 @@ export function clearPaymentGatewayCache(): void {
 /**
  * Resolves which payment provider to use. Prefers GET /payments/gateway; on failure uses .env fallback (local dev).
  */
-export function resolvePaymentGateway(): Promise<PaymentGatewayResponse> {
+export function resolvePaymentGateway(): Promise<ResolvedPaymentGateway> {
 	if (cache) return Promise.resolve(cache);
 	if (inflight) return inflight;
 
 	inflight = creatorsApi.payments
 		.getGateway()
 		.then(body => {
-			const normalized: PaymentGatewayResponse = {
-				provider: normalizeProvider(body.provider),
-				useMock: body.useMock === true,
-			};
+			const maybeProvider = (body as { provider?: string }).provider;
+			const maybeUseMock = (body as { useMock?: boolean }).useMock;
+			const normalized: ResolvedPaymentGateway = { provider: normalizeProvider(maybeProvider), useMock: maybeUseMock === true };
 			cache = normalized;
 			return normalized;
 		})
