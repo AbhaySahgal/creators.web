@@ -105,7 +105,7 @@ export function SessionPickerModal({
 					{protocol === 'sessions' && (
 						<div className="bg-foreground/5 rounded-2xl p-4">
 							<p className="text-xs text-muted">
-								Pricing and wallet checks are handled when the creator accepts your request.
+								Pricing and wallet checks are handled by the server. You must have enough wallet balance to request a session, and the wallet is charged only if the creator accepts.
 							</p>
 						</div>
 					)}

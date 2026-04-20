@@ -156,7 +156,8 @@ export function CreatorProfile() {
 	function handleStartSession(type: SessionType, durationMinutes: number, totalCost: number, payMode: SessionPayMode) {
 		if (!authState.user) return;
 
-		// Sessions WS protocol: pricing & wallet checks are handled server-side (SESSION_PRICE_CENTS).
+		// Sessions WS protocol: pricing & wallet rules are enforced server-side (SESSION_PRICE_CENTS).
+		// Spec: fan must have sufficient wallet balance to request; debit/credit happens on accept.
 		// This UI now sends a request and waits for creator accept/reject push.
 		const kind = type === 'chat' ? 'chat' : 'call';
 		const uiCallType = type === 'audio' ? 'audio' : type === 'video' ? 'video' : undefined;
