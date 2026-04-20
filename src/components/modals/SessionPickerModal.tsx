@@ -111,67 +111,67 @@ export function SessionPickerModal({
 					)}
 
 					{protocol !== 'sessions' && (
-					<div>
-						<div className="flex items-center justify-between mb-3">
-							<p className="text-xs font-semibold text-muted uppercase tracking-widest">Duration</p>
-							<div className="flex items-center gap-1 text-xs text-amber-400">
-								<Zap className="w-3 h-3 fill-amber-400" />
-								<span>{formatINR(ratePerMinute)}/min</span>
+						<div>
+							<div className="flex items-center justify-between mb-3">
+								<p className="text-xs font-semibold text-muted uppercase tracking-widest">Duration</p>
+								<div className="flex items-center gap-1 text-xs text-amber-400">
+									<Zap className="w-3 h-3 fill-amber-400" />
+									<span>{formatINR(ratePerMinute)}/min</span>
+								</div>
+							</div>
+							<div className="grid grid-cols-3 gap-2">
+								{DURATION_OPTIONS.map(min => {
+									const cost = parseFloat((min * ratePerMinute).toFixed(2));
+									const costMinor = inrRupeesToMinor(cost);
+									const affordable = payMode === 'razorpay' || compareMinor(walletBalanceMinor, '>=', costMinor);
+									return (
+										<button
+											key={min}
+											onClick={() => setSelectedDuration(min)}
+											disabled={!affordable}
+											className={`flex flex-col items-center gap-1 p-3 rounded-2xl border transition-all ${
+												!affordable ?
+													'bg-foreground/5 border-border/20 text-muted/50 cursor-not-allowed opacity-50' :
+													selectedDuration === min ?
+														'bg-amber-500/15 border-amber-500/30 text-amber-400' :
+														'bg-foreground/5 border-border/20 text-foreground/80 hover:bg-foreground/10'
+											}`}
+										>
+											<div className="flex items-center gap-1">
+												<Clock className="w-3 h-3" />
+												<span className="text-sm font-bold">{min}m</span>
+											</div>
+											<span className="text-[10px]">{formatINR(cost)}</span>
+										</button>
+									);
+								})}
 							</div>
 						</div>
-						<div className="grid grid-cols-3 gap-2">
-							{DURATION_OPTIONS.map(min => {
-								const cost = parseFloat((min * ratePerMinute).toFixed(2));
-								const costMinor = inrRupeesToMinor(cost);
-								const affordable = payMode === 'razorpay' || compareMinor(walletBalanceMinor, '>=', costMinor);
-								return (
-									<button
-										key={min}
-										onClick={() => setSelectedDuration(min)}
-										disabled={!affordable}
-										className={`flex flex-col items-center gap-1 p-3 rounded-2xl border transition-all ${
-											!affordable ?
-												'bg-foreground/5 border-border/20 text-muted/50 cursor-not-allowed opacity-50' :
-												selectedDuration === min ?
-													'bg-amber-500/15 border-amber-500/30 text-amber-400' :
-													'bg-foreground/5 border-border/20 text-foreground/80 hover:bg-foreground/10'
-										}`}
-									>
-										<div className="flex items-center gap-1">
-											<Clock className="w-3 h-3" />
-											<span className="text-sm font-bold">{min}m</span>
-										</div>
-										<span className="text-[10px]">{formatINR(cost)}</span>
-									</button>
-								);
-							})}
-						</div>
-					</div>
 					)}
 
 					{protocol !== 'sessions' && (
-					<div>
-						<p className="text-xs font-semibold text-muted uppercase tracking-widest mb-2">Payment Method</p>
-						<div className="flex gap-2">
-							<button
-								onClick={() => setPayMode('razorpay')}
-								className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
-									payMode === 'razorpay' ? 'border-rose-500/40 bg-rose-500/10 text-rose-500' : 'border-border/20 bg-foreground/5 text-muted hover:bg-foreground/10'
-								}`}
-							>
-								{totalCost > 0 ? `Pay ${formatINR(totalCost)}` : 'Checkout'}
-							</button>
-							<button
-								onClick={() => setPayMode('wallet')}
-								className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
-									payMode === 'wallet' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500' : 'border-border/20 bg-foreground/5 text-muted hover:bg-foreground/10'
-								}`}
-							>
-								<Wallet className="w-3 h-3 inline mr-1" />
-								Wallet ({formatINRFromMinor(walletBalanceMinor)})
-							</button>
+						<div>
+							<p className="text-xs font-semibold text-muted uppercase tracking-widest mb-2">Payment Method</p>
+							<div className="flex gap-2">
+								<button
+									onClick={() => setPayMode('razorpay')}
+									className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+										payMode === 'razorpay' ? 'border-rose-500/40 bg-rose-500/10 text-rose-500' : 'border-border/20 bg-foreground/5 text-muted hover:bg-foreground/10'
+									}`}
+								>
+									{totalCost > 0 ? `Pay ${formatINR(totalCost)}` : 'Checkout'}
+								</button>
+								<button
+									onClick={() => setPayMode('wallet')}
+									className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+										payMode === 'wallet' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500' : 'border-border/20 bg-foreground/5 text-muted hover:bg-foreground/10'
+									}`}
+								>
+									<Wallet className="w-3 h-3 inline mr-1" />
+									Wallet ({formatINRFromMinor(walletBalanceMinor)})
+								</button>
+							</div>
 						</div>
-					</div>
 					)}
 
 					{protocol !== 'sessions' && selectedDuration && (

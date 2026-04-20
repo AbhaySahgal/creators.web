@@ -12,7 +12,6 @@ import { useNotifications } from '../../context/NotificationContext';
 import { useChat } from '../../context/ChatContext';
 import { useCall } from '../../context/CallContext';
 import { useSession } from '../../context/SessionContext';
-import { useWallet } from '../../context/WalletContext';
 import { SessionPickerModal, type SessionPayMode } from '../../components/modals/SessionPickerModal';
 import type { Creator, SessionType } from '../../types';
 import { creatorsApi } from '../../services/creatorsApi';
@@ -30,8 +29,7 @@ export function CreatorProfile() {
 	const { showToast } = useNotifications();
 	const { addConversation, getConversationForUser } = useChat();
 	const { startCall } = useCall();
-	const { startSession } = useSession();
-	const { deductFunds, payViaRazorpay } = useWallet();
+	useSession();
 	const { requestSession, state: sessionsState, clearOutgoing } = useSessions();
 	const [showTipModal, setShowTipModal] = useState(false);
 	const [showSubscribeModal, setShowSubscribeModal] = useState(false);

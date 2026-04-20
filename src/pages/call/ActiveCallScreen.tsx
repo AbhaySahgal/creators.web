@@ -117,7 +117,7 @@ export function ActiveCallScreen() {
 	useEffect(() => {
 		if ((!call && !sessionsBooking) || !authState.user) return;
 
-		const user = authState.user;
+		const me = authState.user;
 		const participantId =
 			call?.participantId ||
 			session?.creatorId ||
@@ -127,8 +127,8 @@ export function ActiveCallScreen() {
 		const channelName =
 			bookingAgora?.channel_name ||
 			(sessionsBooking?.accepted.room_id ?? '') ||
-			buildCallChannel(user.id, participantId);
-		const uid = bookingAgora?.uid ?? stringToAgoraUid(user.id);
+			buildCallChannel(me.id, participantId);
+		const uid = bookingAgora?.uid ?? stringToAgoraUid(me.id);
 		const appId = bookingAgora?.app_id ?? getAgoraAppId();
 		const client = AgoraRTC.createClient({ codec: 'vp8', mode: 'rtc' });
 		setAgoraError('');

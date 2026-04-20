@@ -21,30 +21,34 @@ export function IncomingSessionRequestOverlay() {
 
 	const isChat = incoming.kind === 'chat';
 
-	async function handleAccept() {
+	function handleAccept() {
 		if (busy) return;
 		setBusy(true);
-		try {
-			await acceptSession(incoming.request_id);
-			showToast('Accepted session request');
-		} catch (e) {
-			showToast(e instanceof Error ? e.message : 'Failed to accept', 'error');
-		} finally {
-			setBusy(false);
-		}
+		acceptSession(incoming.request_id)
+			.then(() => {
+				showToast('Accepted session request');
+			})
+			.catch(e => {
+				showToast(e instanceof Error ? e.message : 'Failed to accept', 'error');
+			})
+			.finally(() => {
+				setBusy(false);
+			});
 	}
 
-	async function handleReject() {
+	function handleReject() {
 		if (busy) return;
 		setBusy(true);
-		try {
-			await rejectSession(incoming.request_id, 'Creator is busy');
-			showToast('Rejected session request');
-		} catch (e) {
-			showToast(e instanceof Error ? e.message : 'Failed to reject', 'error');
-		} finally {
-			setBusy(false);
-		}
+		rejectSession(incoming.request_id, 'Creator is busy')
+			.then(() => {
+				showToast('Rejected session request');
+			})
+			.catch(e => {
+				showToast(e instanceof Error ? e.message : 'Failed to reject', 'error');
+			})
+			.finally(() => {
+				setBusy(false);
+			});
 	}
 
 	return (
@@ -104,4 +108,3 @@ export function IncomingSessionRequestOverlay() {
 		</div>
 	);
 }
-

@@ -95,4 +95,3 @@ export function sessionsFeedback(
 	const args = comment ? [requestId, String(rating), comment] : [requestId, String(rating)];
 	return ws.request('sessions', 'feedback', args, rid).then(r => r as SessionsFeedbackResponse);
 }
-
