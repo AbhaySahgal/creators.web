@@ -56,6 +56,25 @@ export interface RazorpayFailureResponse {
 let scriptStatus: 'idle' | 'loading' | 'loaded' | 'error' = 'idle';
 let scriptPromise: Promise<void> | null = null;
 
+export function clearRazorpaySdkCache(): void {
+	scriptStatus = 'idle';
+	scriptPromise = null;
+
+	try {
+		const scripts = document.querySelectorAll('script[src*="razorpay"]');
+		scripts.forEach(s => s.remove());
+	} catch {
+		// ignore
+	}
+
+	try {
+		// The SDK attaches itself to window; removing it forces a clean reload next time.
+		delete (window as unknown as { Razorpay?: unknown }).Razorpay;
+	} catch {
+		// ignore
+	}
+}
+
 function loadScript(): Promise<void> {
 	if (scriptStatus === 'loaded' || window.Razorpay) {
 		scriptStatus = 'loaded';
