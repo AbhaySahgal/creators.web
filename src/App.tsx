@@ -10,6 +10,7 @@ import { SessionProvider } from './context/SessionContext';
 import { LiveStreamProvider } from './context/LiveStreamContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { WsProvider } from './context/WsContext';
+import { SessionsProvider } from './context/SessionsContext';
 
 import { Landing } from './pages/Landing';
 import { Login } from './pages/auth/Login';
@@ -157,9 +158,11 @@ function Providers({ children }: { children: React.ReactNode }) {
 									<WalletProvider>
 										<CallProvider>
 											<SessionProvider>
-												<LiveStreamProvider>
-													{children}
-												</LiveStreamProvider>
+												<SessionsProvider>
+													<LiveStreamProvider>
+														{children}
+													</LiveStreamProvider>
+												</SessionsProvider>
 											</SessionProvider>
 										</CallProvider>
 									</WalletProvider>
