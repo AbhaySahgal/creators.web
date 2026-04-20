@@ -18,18 +18,20 @@ export function SessionFeedbackModal() {
 
 	if (!isOpen) return null;
 
-	async function handleSubmit() {
+	function handleSubmit() {
 		if (!canSubmit) return;
 		setBusy(true);
-		try {
-			await submitFeedback({ requestId, rating, comment: comment.trim() || undefined });
-			showToast('Feedback submitted');
-			clearFeedback();
-		} catch (e) {
-			showToast(e instanceof Error ? e.message : 'Failed to submit feedback', 'error');
-		} finally {
-			setBusy(false);
-		}
+		submitFeedback({ requestId, rating, comment: comment.trim() || undefined })
+			.then(() => {
+				showToast('Feedback submitted');
+				clearFeedback();
+			})
+			.catch(e => {
+				showToast(e instanceof Error ? e.message : 'Failed to submit feedback', 'error');
+			})
+			.finally(() => {
+				setBusy(false);
+			});
 	}
 
 	return (
@@ -96,4 +98,3 @@ export function SessionFeedbackModal() {
 		</div>
 	);
 }
-

@@ -15,6 +15,8 @@ import {
 import type {
 	SessionKind,
 	SessionsAcceptedPayload,
+	SessionsCompleteResponse,
+	SessionsEndSessionResponse,
 	SessionsFeedbackPromptEvent,
 	SessionsFeedbackReceivedEvent,
 	SessionsRejectedPayload,
@@ -25,51 +27,51 @@ import type {
 export type SessionsUiCallType = 'audio' | 'video';
 
 export type OutgoingRequestState =
-	| { state: 'idle' }
-	| { state: 'requesting', kind: SessionKind, creatorUserId: string }
-	| { state: 'pending', request: SessionsRequestResponse }
-	| { state: 'accepted', accepted: SessionsAcceptedPayload }
-	| { state: 'rejected', rejected: SessionsRejectedPayload };
+	| { state: 'idle' } |
+	{ state: 'requesting', kind: SessionKind, creatorUserId: string } |
+	{ state: 'pending', request: SessionsRequestResponse } |
+	{ state: 'accepted', accepted: SessionsAcceptedPayload } |
+	{ state: 'rejected', rejected: SessionsRejectedPayload };
 
 export type IncomingRequestState = {
-	request: SessionsRequestEvent;
+	request: SessionsRequestEvent,
 };
 
 export type ActiveBookingState = {
-	accepted: SessionsAcceptedPayload;
+	accepted: SessionsAcceptedPayload,
 	/**
 	 * For `kind === "call"`, the UI needs to know whether to show audio vs video.
 	 * The server spec only distinguishes call vs chat, so we keep a local hint.
 	 */
-	uiCallType?: SessionsUiCallType;
-	otherDisplay?: { name: string, avatar: string };
+	uiCallType?: SessionsUiCallType,
+	otherDisplay?: { name: string, avatar: string },
 };
 
 export type FeedbackPromptState = {
-	request_id: string;
+	request_id: string,
 };
 
 type SessionsState = {
-	outgoing: OutgoingRequestState;
-	incoming: IncomingRequestState[];
-	active: ActiveBookingState | null;
-	feedbackPrompt: FeedbackPromptState | null;
-	feedbackReceived: SessionsFeedbackReceivedEvent | null;
+	outgoing: OutgoingRequestState,
+	incoming: IncomingRequestState[],
+	active: ActiveBookingState | null,
+	feedbackPrompt: FeedbackPromptState | null,
+	feedbackReceived: SessionsFeedbackReceivedEvent | null,
 };
 
 type Action =
-	| { type: 'OUTGOING_REQUESTING', payload: { creatorUserId: string, kind: SessionKind } }
-	| { type: 'OUTGOING_PENDING', payload: SessionsRequestResponse }
-	| { type: 'OUTGOING_ACCEPTED', payload: SessionsAcceptedPayload }
-	| { type: 'OUTGOING_REJECTED', payload: SessionsRejectedPayload }
-	| { type: 'OUTGOING_CLEAR' }
-	| { type: 'INCOMING_ADD', payload: SessionsRequestEvent }
-	| { type: 'INCOMING_REMOVE', payload: { request_id: string } }
-	| { type: 'ACTIVE_SET', payload: ActiveBookingState }
-	| { type: 'ACTIVE_CLEAR' }
-	| { type: 'FEEDBACK_PROMPT', payload: SessionsFeedbackPromptEvent }
-	| { type: 'FEEDBACK_RECEIVED', payload: SessionsFeedbackReceivedEvent }
-	| { type: 'FEEDBACK_CLEAR' };
+	| { type: 'OUTGOING_REQUESTING', payload: { creatorUserId: string, kind: SessionKind } } |
+	{ type: 'OUTGOING_PENDING', payload: SessionsRequestResponse } |
+	{ type: 'OUTGOING_ACCEPTED', payload: SessionsAcceptedPayload } |
+	{ type: 'OUTGOING_REJECTED', payload: SessionsRejectedPayload } |
+	{ type: 'OUTGOING_CLEAR' } |
+	{ type: 'INCOMING_ADD', payload: SessionsRequestEvent } |
+	{ type: 'INCOMING_REMOVE', payload: { request_id: string } } |
+	{ type: 'ACTIVE_SET', payload: ActiveBookingState } |
+	{ type: 'ACTIVE_CLEAR' } |
+	{ type: 'FEEDBACK_PROMPT', payload: SessionsFeedbackPromptEvent } |
+	{ type: 'FEEDBACK_RECEIVED', payload: SessionsFeedbackReceivedEvent } |
+	{ type: 'FEEDBACK_CLEAR' };
 
 const initialState: SessionsState = {
 	outgoing: { state: 'idle' },
@@ -114,21 +116,21 @@ function sessionsReducer(state: SessionsState, action: Action): SessionsState {
 }
 
 type SessionsContextValue = {
-	state: SessionsState;
+	state: SessionsState,
 	requestSession: (opts: {
 		creatorUserId: string,
 		kind: SessionKind,
 		uiCallType?: SessionsUiCallType,
 		creatorDisplay?: { name: string, avatar: string },
-	}) => Promise<SessionsRequestResponse>;
-	acceptSession: (requestId: string) => Promise<SessionsAcceptedPayload>;
-	rejectSession: (requestId: string, message?: string) => Promise<SessionsRejectedPayload>;
-	cancelSession: (requestId: string) => Promise<{ ok: true }>;
-	completeSession: (requestId: string) => Promise<{ ok: true }>;
-	endSession: (requestId: string) => Promise<{ ok: true }>;
-	submitFeedback: (opts: { requestId: string, rating: number, comment?: string }) => Promise<void>;
-	clearOutgoing: () => void;
-	clearFeedback: () => void;
+	}) => Promise<SessionsRequestResponse>,
+	acceptSession: (requestId: string) => Promise<SessionsAcceptedPayload>,
+	rejectSession: (requestId: string, message?: string) => Promise<SessionsRejectedPayload>,
+	cancelSession: (requestId: string) => Promise<{ ok: true }>,
+	completeSession: (requestId: string) => Promise<SessionsCompleteResponse>,
+	endSession: (requestId: string) => Promise<SessionsEndSessionResponse>,
+	submitFeedback: (opts: { requestId: string, rating: number, comment?: string }) => Promise<void>,
+	clearOutgoing: () => void,
+	clearFeedback: () => void,
 };
 
 const SessionsContext = createContext<SessionsContextValue | null>(null);
@@ -212,15 +214,13 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 
 	const completeSession = useCallback(
 		(requestId: string) =>
-			sessionsComplete(ws, requestId).then(res => {
-				return { ok: true };
-			}),
+			sessionsComplete(ws, requestId),
 		[ws]
 	);
 
 	const endSession = useCallback(
 		(requestId: string) =>
-			sessionsEndSession(ws, requestId).then(() => ({ ok: true })),
+			sessionsEndSession(ws, requestId),
 		[ws]
 	);
 
@@ -235,7 +235,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 
 	// Subscribe to sessions push events
 	useEffect(() => {
-		const offReq = ws.on('sessions', 'request', (data) => {
+		const offReq = ws.on('sessions', 'request', data => {
 			const payload = data as SessionsRequestEvent;
 			fanMetaByRequestIdRef.current[payload.request_id] = {
 				userId: payload.fan_user_id,
@@ -243,7 +243,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 			};
 			dispatch({ type: 'INCOMING_ADD', payload });
 		});
-		const offAccepted = ws.on('sessions', 'accepted', (data) => {
+		const offAccepted = ws.on('sessions', 'accepted', data => {
 			const payload = data as SessionsAcceptedPayload;
 			const me = authState.user;
 			const creatorMeta = creatorMetaByRequestIdRef.current[payload.request_id];
@@ -262,15 +262,15 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 				},
 			});
 		});
-		const offRejected = ws.on('sessions', 'rejected', (data) => {
+		const offRejected = ws.on('sessions', 'rejected', data => {
 			const payload = data as SessionsRejectedPayload;
 			dispatch({ type: 'OUTGOING_REJECTED', payload });
 		});
-		const offPrompt = ws.on('sessions', 'feedbackprompt', (data) => {
+		const offPrompt = ws.on('sessions', 'feedbackprompt', data => {
 			const payload = data as SessionsFeedbackPromptEvent;
 			dispatch({ type: 'FEEDBACK_PROMPT', payload });
 		});
-		const offReceived = ws.on('sessions', 'feedbackreceived', (data) => {
+		const offReceived = ws.on('sessions', 'feedbackreceived', data => {
 			const payload = data as SessionsFeedbackReceivedEvent;
 			dispatch({ type: 'FEEDBACK_RECEIVED', payload });
 		});
@@ -283,6 +283,19 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 			offReceived();
 		};
 	}, [ws, authState.user]);
+
+	// Cross-service: `/endsession` on `sessions` may also emit `|call|ended|{...}`.
+	useEffect(() => {
+		const offEnded = ws.on('call', 'ended', data => {
+			const payload = data as { session_id?: string };
+			const active = state.active?.accepted;
+			if (!active || active.kind !== 'call') return;
+			if (!payload?.session_id) return;
+			if (active.call_session_id && active.call_session_id !== payload.session_id) return;
+			dispatch({ type: 'ACTIVE_CLEAR' });
+		});
+		return offEnded;
+	}, [ws, state.active?.accepted?.kind, state.active?.accepted?.call_session_id]);
 
 	// Route side-effects when a booking becomes active.
 	useEffect(() => {
@@ -355,4 +368,3 @@ export function useSessions(): SessionsContextValue {
 	if (!ctx) throw new Error('useSessions must be used within SessionsProvider');
 	return ctx;
 }
-
