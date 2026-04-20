@@ -17,6 +17,8 @@ type PendingReq = {
 type AnyListener = (frame: WsFrame) => void;
 type EventListener = (data: unknown, frame: Extract<WsFrame, { type: 'event' }>) => void;
 
+const DEFAULT_CREATORS_API_ORIGIN = 'https://creatorsapi.pnine.me';
+
 /**
  * Showdown-like connection manager:
  * - one socket
