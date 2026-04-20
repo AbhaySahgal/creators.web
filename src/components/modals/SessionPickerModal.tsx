@@ -8,6 +8,8 @@ const DURATION_OPTIONS = [5, 10, 15, 20, 30, 60];
 
 export type SessionPayMode = 'razorpay' | 'wallet';
 
+export type SessionPickerProtocol = 'local' | 'sessions';
+
 interface Props {
 	isOpen: boolean;
 	onClose: () => void;
@@ -16,6 +18,8 @@ interface Props {
 	ratePerMinute: number;
 	walletBalanceMinor: string;
 	onConfirm: (type: SessionType, durationMinutes: number, totalCost: number, payMode: SessionPayMode) => void;
+	/** When set to `sessions`, the UI will only collect the session type and defer pricing/payment to the backend sessions service. */
+	protocol?: SessionPickerProtocol;
 }
 
 const SESSION_TYPES: { type: SessionType, label: string, icon: React.ElementType, color: string, bg: string }[] = [
@@ -24,7 +28,16 @@ const SESSION_TYPES: { type: SessionType, label: string, icon: React.ElementType
 	{ type: 'video', label: 'Video Call', icon: Video, color: 'text-rose-400', bg: 'bg-rose-500/15 border-rose-500/30' },
 ];
 
-export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar, ratePerMinute, walletBalanceMinor, onConfirm }: Props) {
+export function SessionPickerModal({
+	isOpen,
+	onClose,
+	creatorName,
+	creatorAvatar,
+	ratePerMinute,
+	walletBalanceMinor,
+	onConfirm,
+	protocol = 'local',
+}: Props) {
 	const [selectedType, setSelectedType] = useState<SessionType | null>(null);
 	const [selectedDuration, setSelectedDuration] = useState<number | null>(null);
 	const [payMode, setPayMode] = useState<SessionPayMode>('razorpay');
@@ -34,10 +47,19 @@ export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar
 	const totalCost = selectedDuration ? parseFloat((selectedDuration * ratePerMinute).toFixed(2)) : 0;
 	const totalMinor = inrRupeesToMinor(totalCost);
 	const canAfford = payMode === 'razorpay' || compareMinor(walletBalanceMinor, '>=', totalMinor);
-	const canStart = selectedType && selectedDuration && canAfford;
+	const canStart =
+		protocol === 'sessions' ?
+			!!selectedType :
+			!!selectedType && !!selectedDuration && canAfford;
 
 	function handleConfirm() {
-		if (!selectedType || !selectedDuration) return;
+		if (!selectedType) return;
+		if (protocol === 'sessions') {
+			onConfirm(selectedType, 0, 0, 'wallet');
+			onClose();
+			return;
+		}
+		if (!selectedDuration) return;
 		onConfirm(selectedType, selectedDuration, totalCost, payMode);
 		onClose();
 	}
@@ -80,6 +102,15 @@ export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar
 						</div>
 					</div>
 
+					{protocol === 'sessions' && (
+						<div className="bg-foreground/5 rounded-2xl p-4">
+							<p className="text-xs text-muted">
+								Pricing and wallet checks are handled when the creator accepts your request.
+							</p>
+						</div>
+					)}
+
+					{protocol !== 'sessions' && (
 					<div>
 						<div className="flex items-center justify-between mb-3">
 							<p className="text-xs font-semibold text-muted uppercase tracking-widest">Duration</p>
@@ -116,7 +147,9 @@ export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar
 							})}
 						</div>
 					</div>
+					)}
 
+					{protocol !== 'sessions' && (
 					<div>
 						<p className="text-xs font-semibold text-muted uppercase tracking-widest mb-2">Payment Method</p>
 						<div className="flex gap-2">
@@ -139,8 +172,9 @@ export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar
 							</button>
 						</div>
 					</div>
+					)}
 
-					{selectedDuration && (
+					{protocol !== 'sessions' && selectedDuration && (
 						<div className="bg-foreground/5 rounded-2xl p-4 flex items-center justify-between">
 							<div>
 								<p className="text-xs text-muted mb-0.5">Total cost</p>
@@ -157,7 +191,7 @@ export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar
 						</div>
 					)}
 
-					{!canAfford && selectedDuration && (
+					{protocol !== 'sessions' && !canAfford && selectedDuration && (
 						<div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2.5">
 							<AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
 							<p className="text-xs text-rose-300">Insufficient balance. Use checkout or add funds.</p>
@@ -171,11 +205,13 @@ export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar
 					>
 						{!selectedType ?
 							'Select a session type' :
-							!selectedDuration ?
+							protocol !== 'sessions' && !selectedDuration ?
 								'Select duration' :
-								!canAfford ?
+								protocol !== 'sessions' && !canAfford ?
 									'Insufficient balance' :
-									`Start ${selectedType === 'chat' ? 'Chat' : selectedType === 'audio' ? 'Audio Call' : 'Video Call'} for ${formatINR(totalCost)}`}
+									protocol === 'sessions' ?
+										`Request ${selectedType === 'chat' ? 'Chat' : selectedType === 'audio' ? 'Audio Call' : 'Video Call'}` :
+										`Start ${selectedType === 'chat' ? 'Chat' : selectedType === 'audio' ? 'Audio Call' : 'Video Call'} for ${formatINR(totalCost)}`}
 					</button>
 				</div>
 			</div>
