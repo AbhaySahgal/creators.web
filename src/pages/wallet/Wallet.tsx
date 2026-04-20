@@ -7,7 +7,6 @@ import { useAuth } from '../../context/AuthContext';
 import { useWallet } from '../../context/WalletContext';
 import { formatDate } from '../../utils/date';
 import { delayMs } from '../../utils/delay';
-import { getExternalPaySecureHint } from '../../services/payments';
 import type { Transaction } from '../../types';
 import { formatINRFromMinor } from '../../utils/money';
 import type { RazorpayOrderRow } from '../../services/paymentWs';
@@ -131,7 +130,7 @@ export function Wallet() {
 		setIsLoading(true);
 		void delayMs(400).then(() => {
 			setPayError('');
-			void addFundsExternally(amount).then(ok => {
+			void addFundsViaRazorpay(amount).then(ok => {
 				if (ok) {
 					setAddSuccess(true);
 					setTimeout(() => {
