@@ -105,22 +105,27 @@ export interface PaymentRequest {
 	orderId?: string;
 	notes?: Record<string, string>;
 	receiptId?: string;
+	/** Server order amount in paise; overrides `amountINR` when set (must match Razorpay order). */
+	amountPaise?: number;
+	/** Public key from `POST /payments/razorpay/orders` (`keyId`); falls back to `VITE_RAZORPAY_KEY_ID`. */
+	keyId?: string | null;
 }
 
 export function openRazorpayCheckout(req: PaymentRequest): Promise<RazorpaySuccessResponse> {
-	if (!RAZORPAY_KEY_ID) {
-		throw new Error('Razorpay key not configured. Set VITE_RAZORPAY_KEY_ID in .env');
+	const key = (req.keyId ?? RAZORPAY_KEY_ID) || '';
+	if (!key) {
+		throw new Error('Razorpay key not configured. Pass keyId from the create-order response or set VITE_RAZORPAY_KEY_ID in .env');
 	}
 
-	if (req.amountINR <= 0) {
+	if (req.amountINR <= 0 && (req.amountPaise == null || req.amountPaise <= 0)) {
 		throw new Error('Payment amount must be greater than zero');
 	}
 
 	return loadScript().then(() => new Promise<RazorpaySuccessResponse>((resolve, reject) => {
-		const amountPaise = Math.round(req.amountINR * 100);
+		const amountPaise = req.amountPaise ?? Math.round(req.amountINR * 100);
 
 		const options: RazorpayOptions = {
-			key: RAZORPAY_KEY_ID,
+			key,
 			amount: amountPaise,
 			currency: 'INR',
 			name: 'Creators Platform',
@@ -170,3 +175,14 @@ export function openRazorpayCheckout(req: PaymentRequest): Promise<RazorpaySucce
 		}
 	}));
 }
+
+/**
+ * Check if a payment error was user-initiated cancellation (not a real failure).
+ */
+export function isPaymentCancelled(err: unknown): boolean {
+	return err instanceof Error && err.message === 'PAYMENT_CANCELLED';
+}
+
+// ─── Currency helpers (amounts are INR rupees in UI/catalog) ─────────────────
+
+export { formatINRRupees as formatINR } from '../utils/money';

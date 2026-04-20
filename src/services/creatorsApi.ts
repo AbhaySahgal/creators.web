@@ -64,6 +64,8 @@ export interface RazorpayCreateOrderResponse {
 	orderId: string;
 	amountMinor: number;
 	currency: string;
+	/** Public Razorpay key for Checkout; null when unset (local dev). */
+	keyId: string | null;
 }
 
 export interface RazorpayConfirmRequest {
@@ -72,37 +74,10 @@ export interface RazorpayConfirmRequest {
 	razorpaySignature: string;
 }
 
-/** Backend decides active gateway; frontend does not let users choose Razorpay vs Stripe. */
-export interface PaymentGatewayResponse {
-	provider: 'razorpay' | 'stripe';
-	/** When true, client simulates checkout (optional; backend can force for staging). */
-	useMock?: boolean;
-}
-
-/** Backend: create PaymentIntent — returns client secret for Stripe.js confirm. */
-export interface StripeCreatePaymentIntentRequest {
-	amountMinor: number;
-	currency?: string;
-	metadata?: Record<string, string>;
-}
-
-export interface StripeCreatePaymentIntentResponse {
-	clientSecret: string;
-	paymentIntentId?: string;
-}
-
-/** Backend: Stripe Checkout redirect flow. */
-export interface StripeCreateCheckoutSessionRequest {
-	amountMinor: number;
-	currency?: string;
-	successUrl: string;
-	cancelUrl: string;
-	metadata?: Record<string, string>;
-}
-
-export interface StripeCreateCheckoutSessionResponse {
-	url: string;
-	sessionId?: string;
+export interface RazorpayConfirmResponse {
+	ok: true;
+	balance_after_cents: string;
+	alreadyConfirmed?: true;
 }
 
 export interface MediaCreateUploadRequest {
@@ -236,8 +211,8 @@ export const creatorsApi = {
 		razorpayCreateOrder(body: RazorpayCreateOrderRequest): Promise<RazorpayCreateOrderResponse> {
 			return requestJson<RazorpayCreateOrderResponse>('/payments/razorpay/orders', { method: 'POST', body, auth: true });
 		},
-		razorpayConfirm(body: RazorpayConfirmRequest): Promise<{ ok: true }> {
-			return requestJson<{ ok: true }>('/payments/razorpay/confirm', { method: 'POST', body, auth: true });
+		razorpayConfirm(body: RazorpayConfirmRequest): Promise<RazorpayConfirmResponse> {
+			return requestJson<RazorpayConfirmResponse>('/payments/razorpay/confirm', { method: 'POST', body, auth: true });
 		},
 		/** When backend is ready: implement POST /payments/stripe/create-payment-intent */
 		stripeCreatePaymentIntent(body: StripeCreatePaymentIntentRequest): Promise<StripeCreatePaymentIntentResponse> {

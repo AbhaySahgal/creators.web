@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:mock": "dotenv -e .env.mock -- vite",
-    "dev:api": "dotenv -e .env.api -- vite",
+    "dev:mock": "vite --mode mock",
+    "dev:api": "vite --mode api",
     "build": "vite build",
     "lint": "eslint src eslint.config.js",
     "lint:fix": "eslint src eslint.config.js --fix",
