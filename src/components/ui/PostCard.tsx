@@ -205,7 +205,7 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 	}
 
 	return (
-		<div className="bg-surface border border-border/20 rounded-2xl overflow-hidden hover:border-border/30 transition-all duration-300">
+		<div className="bg-surface border border-border/20 rounded-2xl overflow-hidden shadow-sm shadow-black/5 dark:shadow-none hover:border-border/30 hover:shadow-md hover:shadow-black/10 dark:hover:shadow-none transition-all duration-300">
 			<div className="flex items-center justify-between px-4 pt-4 pb-3">
 				<button type="button" onClick={handleCreatorClick} className="flex items-center gap-3 group">
 					<Avatar src={post.creatorAvatar} alt={post.creatorName} size="md" />

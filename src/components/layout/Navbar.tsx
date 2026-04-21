@@ -81,6 +81,7 @@ export function Navbar() {
 									path="/creator-dashboard"
 									current={location.pathname}
 									onClick={() => { void navigate('/creator-dashboard'); }}
+									exact
 								/>
 								<NavLink
 									label="Content"
@@ -113,6 +114,7 @@ export function Navbar() {
 							path="/admin"
 							current={location.pathname}
 							onClick={() => { void navigate('/admin'); }}
+							exact
 						/>
 						<NavLink
 							label="KYC Queue"
@@ -279,14 +281,15 @@ export function Navbar() {
 	);
 }
 
-function NavLink({ label, path, current, onClick, badge }: {
+function NavLink({ label, path, current, onClick, badge, exact }: {
 	label: string,
 	path: string,
 	current: string,
 	onClick: () => void,
 	badge?: number,
+	exact?: boolean,
 }) {
-	const isActive = current === path || (path !== '/' && current.startsWith(path));
+	const isActive = exact ? current === path : current === path || (path !== '/' && current.startsWith(path));
 	return (
 		<button
 			type="button"

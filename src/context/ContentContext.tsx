@@ -287,9 +287,21 @@ function contentReducer(state: ContentState, action: ContentAction): ContentStat
 			};
 		}
 		case 'SET_CREATOR_PROFILES': {
+			const patch = action.payload;
+			const patchKeys = Object.keys(patch);
 			return {
 				...state,
-				creatorProfiles: { ...state.creatorProfiles, ...action.payload },
+				creatorProfiles: { ...state.creatorProfiles, ...patch },
+				posts: patchKeys.length === 0 ? state.posts : state.posts.map(p => {
+					const prof = patch[p.creatorId];
+					if (!prof) return p;
+					return {
+						...p,
+						creatorName: prof.name ?? p.creatorName,
+						creatorUsername: prof.username ?? p.creatorUsername,
+						creatorAvatar: prof.avatar ?? p.creatorAvatar,
+					};
+				}),
 			};
 		}
 		default:
@@ -366,7 +378,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				const cached = resolveCreatorDisplay(id, prev);
 				if (cached) continue;
 				missing.push(id);
-				batch[id] = { name: 'Creator', avatar: '', username: 'user' };
+				batch[id] = { name: 'Creator', avatar: '', username: 'creator' };
 			}
 
 			// Resolve fast with cached + placeholders.
