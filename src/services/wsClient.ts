@@ -97,7 +97,10 @@ class WsConnection {
 			this.queue.push(msg);
 			return;
 		}
-		console.log(`[>>] ${msg}`);
+		let roomid = '';
+		if (msg.startsWith('>')) roomid = msg.split('\n')[0].replace('>', '').trim();
+		console.log('[>>] ' + (roomid ? '[' + roomid + '] ' : '') + '' + msg.split('\n')[1]);
+
 		try {
 			this.socket.send(msg);
 		} catch (err) {
@@ -171,7 +174,8 @@ export class WsClient {
 	}
 
 	receive(raw: string): void {
-		console.log(`[<<] ${raw}`);
+		console.log('[<<] ' + raw);
+
 		raw.split('\n').forEach(line => {
 			const trimmed = line.trim();
 			if (!trimmed) return;
