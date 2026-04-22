@@ -226,11 +226,9 @@ export function Landing() {
 							<div className="bg-surface2 border border-border/20 rounded-2xl p-5">
 								<p className="text-sm font-semibold text-foreground mb-1.5">Prefer email?</p>
 								<p className="text-sm text-muted">
-									Write to{' '}
-									<a className="text-rose-400 hover:text-rose-300 transition-colors" href="mailto:support@creators.web">
+									Write to <a className="text-rose-400 hover:text-rose-300 transition-colors" href="mailto:support@creators.web">
 										support@creators.web
-									</a>
-									.
+									</a>.
 								</p>
 								<div className="mt-4 flex flex-col sm:flex-row gap-3">
 									<button
