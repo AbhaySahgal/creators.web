@@ -236,7 +236,7 @@ export function Settings() {
 											'bg-foreground/10 border-border/30',
 											'peer-checked:bg-rose-500 peer-checked:border-rose-500/40',
 											'peer-focus-visible:ring-2 peer-focus-visible:ring-ring/30 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background',
-											'after:content-[\"\"] after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-sm after:transition-transform after:duration-200',
+											"after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-sm after:transition-transform after:duration-200",
 											'peer-checked:after:translate-x-5',
 										].join(' ')}
 									/>
