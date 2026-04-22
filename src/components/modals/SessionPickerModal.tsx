@@ -8,6 +8,8 @@ const DURATION_OPTIONS = [5, 10, 15, 20, 30, 60];
 
 export type SessionPayMode = 'external' | 'wallet';
 
+export type SessionPickerProtocol = 'local' | 'sessions';
+
 interface Props {
 	isOpen: boolean;
 	onClose: () => void;
@@ -16,6 +18,8 @@ interface Props {
 	ratePerMinute: number;
 	walletBalanceMinor: string;
 	onConfirm: (type: SessionType, durationMinutes: number, totalCost: number, payMode: SessionPayMode) => void;
+	/** When set to `sessions`, the UI will only collect the session type and defer pricing/payment to the backend sessions service. */
+	protocol?: SessionPickerProtocol;
 }
 
 const SESSION_TYPES: { type: SessionType, label: string, icon: React.ElementType, color: string, bg: string }[] = [
@@ -24,7 +28,16 @@ const SESSION_TYPES: { type: SessionType, label: string, icon: React.ElementType
 	{ type: 'video', label: 'Video Call', icon: Video, color: 'text-rose-400', bg: 'bg-rose-500/15 border-rose-500/30' },
 ];
 
-export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar, ratePerMinute, walletBalanceMinor, onConfirm }: Props) {
+export function SessionPickerModal({
+	isOpen,
+	onClose,
+	creatorName,
+	creatorAvatar,
+	ratePerMinute,
+	walletBalanceMinor,
+	onConfirm,
+	protocol = 'local',
+}: Props) {
 	const [selectedType, setSelectedType] = useState<SessionType | null>(null);
 	const [selectedDuration, setSelectedDuration] = useState<number | null>(null);
 	const [payMode, setPayMode] = useState<SessionPayMode>('external');
@@ -33,11 +46,20 @@ export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar
 
 	const totalCost = selectedDuration ? parseFloat((selectedDuration * ratePerMinute).toFixed(2)) : 0;
 	const totalMinor = inrRupeesToMinor(totalCost);
-	const canAfford = payMode === 'razorpay' || compareMinor(walletBalanceMinor, '>=', totalMinor);
-	const canStart = selectedType && selectedDuration && canAfford;
+	const canAfford = payMode === 'external' || compareMinor(walletBalanceMinor, '>=', totalMinor);
+	const canStart =
+		protocol === 'sessions' ?
+			!!selectedType :
+			!!selectedType && !!selectedDuration && canAfford;
 
 	function handleConfirm() {
-		if (!selectedType || !selectedDuration) return;
+		if (!selectedType) return;
+		if (protocol === 'sessions') {
+			onConfirm(selectedType, 0, 0, 'wallet');
+			onClose();
+			return;
+		}
+		if (!selectedDuration) return;
 		onConfirm(selectedType, selectedDuration, totalCost, payMode);
 		onClose();
 	}
@@ -80,67 +102,79 @@ export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar
 						</div>
 					</div>
 
-					<div>
-						<div className="flex items-center justify-between mb-3">
-							<p className="text-xs font-semibold text-muted uppercase tracking-widest">Duration</p>
-							<div className="flex items-center gap-1 text-xs text-amber-400">
-								<Zap className="w-3 h-3 fill-amber-400" />
-								<span>{formatINR(ratePerMinute)}/min</span>
+					{protocol === 'sessions' && (
+						<div className="bg-foreground/5 rounded-2xl p-4">
+							<p className="text-xs text-muted">
+								Pricing and wallet checks are handled by the server. You must have enough wallet balance to request a session, and the wallet is charged only if the creator accepts.
+							</p>
+						</div>
+					)}
+
+					{protocol !== 'sessions' && (
+						<div>
+							<div className="flex items-center justify-between mb-3">
+								<p className="text-xs font-semibold text-muted uppercase tracking-widest">Duration</p>
+								<div className="flex items-center gap-1 text-xs text-amber-400">
+									<Zap className="w-3 h-3 fill-amber-400" />
+									<span>{formatINR(ratePerMinute)}/min</span>
+								</div>
+							</div>
+							<div className="grid grid-cols-3 gap-2">
+								{DURATION_OPTIONS.map(min => {
+									const cost = parseFloat((min * ratePerMinute).toFixed(2));
+									const costMinor = inrRupeesToMinor(cost);
+									const affordable = payMode === 'external' || compareMinor(walletBalanceMinor, '>=', costMinor);
+									return (
+										<button
+											key={min}
+											onClick={() => setSelectedDuration(min)}
+											disabled={!affordable}
+											className={`flex flex-col items-center gap-1 p-3 rounded-2xl border transition-all ${
+												!affordable ?
+													'bg-foreground/5 border-border/20 text-muted/50 cursor-not-allowed opacity-50' :
+													selectedDuration === min ?
+														'bg-amber-500/15 border-amber-500/30 text-amber-400' :
+														'bg-foreground/5 border-border/20 text-foreground/80 hover:bg-foreground/10'
+											}`}
+										>
+											<div className="flex items-center gap-1">
+												<Clock className="w-3 h-3" />
+												<span className="text-sm font-bold">{min}m</span>
+											</div>
+											<span className="text-[10px]">{formatINR(cost)}</span>
+										</button>
+									);
+								})}
 							</div>
 						</div>
-						<div className="grid grid-cols-3 gap-2">
-							{DURATION_OPTIONS.map(min => {
-								const cost = parseFloat((min * ratePerMinute).toFixed(2));
-								const costMinor = inrRupeesToMinor(cost);
-								const affordable = payMode === 'razorpay' || compareMinor(walletBalanceMinor, '>=', costMinor);
-								return (
-									<button
-										key={min}
-										onClick={() => setSelectedDuration(min)}
-										disabled={!affordable}
-										className={`flex flex-col items-center gap-1 p-3 rounded-2xl border transition-all ${
-											!affordable ?
-												'bg-foreground/5 border-border/20 text-muted/50 cursor-not-allowed opacity-50' :
-												selectedDuration === min ?
-													'bg-amber-500/15 border-amber-500/30 text-amber-400' :
-													'bg-foreground/5 border-border/20 text-foreground/80 hover:bg-foreground/10'
-										}`}
-									>
-										<div className="flex items-center gap-1">
-											<Clock className="w-3 h-3" />
-											<span className="text-sm font-bold">{min}m</span>
-										</div>
-										<span className="text-[10px]">{formatINR(cost)}</span>
-									</button>
-								);
-							})}
-						</div>
-					</div>
+					)}
 
-					<div>
-						<p className="text-xs font-semibold text-muted uppercase tracking-widest mb-2">Payment Method</p>
-						<div className="flex gap-2">
-							<button
-								onClick={() => setPayMode('external')}
-								className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
-									payMode === 'external' ? 'border-rose-500/40 bg-rose-500/10 text-rose-500' : 'border-border/20 bg-foreground/5 text-muted hover:bg-foreground/10'
-								}`}
-							>
-								{totalCost > 0 ? `Pay ${formatINR(totalCost)}` : 'Checkout'}
-							</button>
-							<button
-								onClick={() => setPayMode('wallet')}
-								className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
-									payMode === 'wallet' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500' : 'border-border/20 bg-foreground/5 text-muted hover:bg-foreground/10'
-								}`}
-							>
-								<Wallet className="w-3 h-3 inline mr-1" />
-								Wallet ({formatINRFromMinor(walletBalanceMinor)})
-							</button>
+					{protocol !== 'sessions' && (
+						<div>
+							<p className="text-xs font-semibold text-muted uppercase tracking-widest mb-2">Payment Method</p>
+							<div className="flex gap-2">
+								<button
+									onClick={() => setPayMode('external')}
+									className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+										payMode === 'external' ? 'border-rose-500/40 bg-rose-500/10 text-rose-500' : 'border-border/20 bg-foreground/5 text-muted hover:bg-foreground/10'
+									}`}
+								>
+									{totalCost > 0 ? `Pay ${formatINR(totalCost)}` : 'Checkout'}
+								</button>
+								<button
+									onClick={() => setPayMode('wallet')}
+									className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+										payMode === 'wallet' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500' : 'border-border/20 bg-foreground/5 text-muted hover:bg-foreground/10'
+									}`}
+								>
+									<Wallet className="w-3 h-3 inline mr-1" />
+									Wallet ({formatINRFromMinor(walletBalanceMinor)})
+								</button>
+							</div>
 						</div>
-					</div>
+					)}
 
-					{selectedDuration && (
+					{protocol !== 'sessions' && selectedDuration && (
 						<div className="bg-foreground/5 rounded-2xl p-4 flex items-center justify-between">
 							<div>
 								<p className="text-xs text-muted mb-0.5">Total cost</p>
@@ -151,13 +185,13 @@ export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar
 									{payMode === 'external' ? 'INR amount' : 'Wallet balance'}
 								</p>
 								<p className={`text-sm font-semibold ${canAfford ? 'text-emerald-400' : 'text-rose-400'}`}>
-									{payMode === 'razorpay' ? formatINR(totalCost) : formatINRFromMinor(walletBalanceMinor)}
+									{payMode === 'external' ? formatINR(totalCost) : formatINRFromMinor(walletBalanceMinor)}
 								</p>
 							</div>
 						</div>
 					)}
 
-					{!canAfford && selectedDuration && (
+					{protocol !== 'sessions' && !canAfford && selectedDuration && (
 						<div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2.5">
 							<AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
 							<p className="text-xs text-rose-300">Insufficient balance. Use checkout or add funds.</p>
@@ -171,11 +205,13 @@ export function SessionPickerModal({ isOpen, onClose, creatorName, creatorAvatar
 					>
 						{!selectedType ?
 							'Select a session type' :
-							!selectedDuration ?
+							protocol !== 'sessions' && !selectedDuration ?
 								'Select duration' :
-								!canAfford ?
+								protocol !== 'sessions' && !canAfford ?
 									'Insufficient balance' :
-									`Start ${selectedType === 'chat' ? 'Chat' : selectedType === 'audio' ? 'Audio Call' : 'Video Call'} for ${formatINR(totalCost)}`}
+									protocol === 'sessions' ?
+										`Request ${selectedType === 'chat' ? 'Chat' : selectedType === 'audio' ? 'Audio Call' : 'Video Call'}` :
+										`Start ${selectedType === 'chat' ? 'Chat' : selectedType === 'audio' ? 'Audio Call' : 'Video Call'} for ${formatINR(totalCost)}`}
 					</button>
 				</div>
 			</div>

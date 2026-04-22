@@ -7,6 +7,7 @@ import { useContent } from '../../context/ContentContext';
 import { useWallet } from '../../context/WalletContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useCall } from '../../context/CallContext';
+import { useSessions } from '../../context/SessionsContext';
 import { Avatar } from '../../components/ui/Avatar';
 import { TipModal } from '../../components/modals/TipModal';
 import { formatDistanceToNow } from '../../utils/date';
@@ -32,6 +33,7 @@ export function ChatRoom() {
 	const { deductFunds } = useWallet();
 	const { showToast } = useNotifications();
 	const { startCall } = useCall();
+	const { state: sessionsState, endSession: endBookedSession } = useSessions();
 	const [text, setText] = useState('');
 	const [showTipModal, setShowTipModal] = useState(false);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -88,6 +90,10 @@ export function ChatRoom() {
 	}
 
 	const roomId = convId;
+	const activeChatBooking =
+		sessionsState.active?.accepted.kind === 'chat' && sessionsState.active.accepted.room_id === roomId ?
+			sessionsState.active.accepted :
+			null;
 
 	const otherIdx = conv.participantIds.indexOf(userId) === 0 ? 1 : 0;
 	const otherName = conv.participantNames[otherIdx];
@@ -186,6 +192,19 @@ export function ChatRoom() {
 						<p className="text-xs text-muted">{statusLine}</p>
 					</div>
 					<div className="ml-auto flex items-center gap-2">
+						{activeChatBooking && (
+							<button
+								type="button"
+								onClick={() => {
+									void endBookedSession(activeChatBooking.request_id)
+										.then(() => showToast('Session ended'))
+										.catch(err => showToast(err instanceof Error ? err.message : 'Failed to end session', 'error'));
+								}}
+								className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/15 transition-colors"
+							>
+								End session
+							</button>
+						)}
 						<button
 							type="button"
 							onClick={() => { startCall(otherId, otherName, otherAvatar, 'audio'); void navigate('/call'); }}

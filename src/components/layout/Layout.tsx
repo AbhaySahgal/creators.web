@@ -2,6 +2,8 @@ import { Navbar } from './Navbar';
 import { BottomNav } from './BottomNav';
 import { ToastContainer } from '../ui/Toast';
 import { IncomingCallOverlay } from '../call/IncomingCallOverlay';
+import { IncomingSessionRequestOverlay } from '../session/IncomingSessionRequestOverlay';
+import { SessionFeedbackModal } from '../session/SessionFeedbackModal';
 
 interface LayoutProps {
 	children: React.ReactNode;
@@ -17,6 +19,8 @@ export function Layout({ children }: LayoutProps) {
 			<BottomNav />
 			<ToastContainer />
 			<IncomingCallOverlay />
+			<IncomingSessionRequestOverlay />
+			<SessionFeedbackModal />
 		</div>
 	);
 }

@@ -69,8 +69,7 @@ export function clearRazorpaySdkCache(): void {
 
 	try {
 		// The SDK attaches itself to window; removing it forces a clean reload next time.
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		delete (window as any).Razorpay;
+		delete (window as unknown as { Razorpay?: unknown }).Razorpay;
 	} catch {
 		// ignore
 	}
