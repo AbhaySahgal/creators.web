@@ -46,6 +46,8 @@ import { CallHistory } from './pages/call/CallHistory';
 import { TimedChatRoom } from './pages/session/TimedChatRoom';
 import { LiveStreamRoom } from './pages/live/LiveStreamRoom';
 import { GoLivePage } from './pages/live/GoLivePage';
+import { Contact } from './pages/Contact';
+import { PrivacyPolicy } from './pages/PrivacyPolicy';
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
 	constructor(props: { children: React.ReactNode }) {
@@ -102,6 +104,8 @@ function AppRoutes() {
 	return (
 		<Routes>
 			<Route path="/" element={<Landing />} />
+			<Route path="/contact" element={<Contact />} />
+			<Route path="/privacy-policy" element={<PrivacyPolicy />} />
 			<Route path="/partner/apply" element={<PartnerApply />} />
 			<Route
 				path="/login" element={state.isAuthenticated ? (
