@@ -12,7 +12,6 @@ import { useNotifications } from '../../context/NotificationContext';
 import { useChat } from '../../context/ChatContext';
 import { useCall } from '../../context/CallContext';
 import { useSession } from '../../context/SessionContext';
-import { useWallet } from '../../context/WalletContext';
 import { SessionPickerModal, type SessionPayMode } from '../../components/modals/SessionPickerModal';
 import type { Creator, SessionType } from '../../types';
 import { creatorsApi } from '../../services/creatorsApi';
@@ -20,6 +19,7 @@ import { creatorProfileDtoToCreator } from '../../services/creatorWsMap';
 import { isPostsMockMode } from '../../services/postsMode';
 import { randomUuid } from '../../utils/isUuid';
 import { formatINR } from '../../services/razorpay';
+import { useSessions } from '../../context/SessionsContext';
 
 export function CreatorProfile() {
 	const { id } = useParams<{ id: string }>();
@@ -29,8 +29,8 @@ export function CreatorProfile() {
 	const { showToast } = useNotifications();
 	const { addConversation, getConversationForUser } = useChat();
 	const { startCall } = useCall();
-	const { startSession } = useSession();
-	const { deductFunds, payExternally } = useWallet();
+	useSession();
+	const { requestSession, state: sessionsState, clearOutgoing } = useSessions();
 	const [showTipModal, setShowTipModal] = useState(false);
 	const [showSubscribeModal, setShowSubscribeModal] = useState(false);
 	const [showSessionModal, setShowSessionModal] = useState(false);
@@ -154,56 +154,36 @@ export function CreatorProfile() {
 	function handleStartSession(type: SessionType, durationMinutes: number, totalCost: number, payMode: SessionPayMode) {
 		if (!authState.user) return;
 
-		const userId = authState.user.id;
-		const userName = authState.user.name;
+		// Sessions WS protocol: pricing & wallet rules are enforced server-side (SESSION_PRICE_CENTS).
+		// Spec: fan must have sufficient wallet balance to request; debit/credit happens on accept.
+		// This UI now sends a request and waits for creator accept/reject push.
+		const kind = type === 'chat' ? 'chat' : 'call';
+		const uiCallType = type === 'audio' ? 'audio' : type === 'video' ? 'video' : undefined;
 
-		const startAndNavigate = () => {
-			startSession(
-				type,
-				creatorForDisplay.id,
-				creatorForDisplay.name,
-				creatorForDisplay.avatar,
-				userId,
-				userName,
-				durationMinutes,
-				creatorForDisplay.perMinuteRate
-			);
-
-			if (type === 'chat') {
-				void navigate(`/session/chat/${creatorForDisplay.id}`);
-				return;
-			}
-
-			startCall(creatorForDisplay.id, creatorForDisplay.name, creatorForDisplay.avatar, type);
-			void navigate('/call');
-		};
-
-		if (payMode === 'external') {
-			void payExternally(
-				totalCost,
-				'session',
-				`${type} session with ${creatorForDisplay.name} (${durationMinutes}min)`,
-				creatorForDisplay.id,
-				creatorForDisplay.name
-			).then(result => {
-				if (!result.ok) {
-					if (!result.cancelled) showToast(result.error || 'Payment failed.', 'error');
-					return;
-				}
-
-				startAndNavigate();
-			});
-			return;
-		}
-
-		const ok = deductFunds(totalCost, 'session', `Session with ${creatorForDisplay.name}`, creatorForDisplay.id, creatorForDisplay.name);
-		if (!ok) {
-			showToast('Insufficient wallet balance.', 'error');
-			return;
-		}
-
-		startAndNavigate();
+		void requestSession({
+			creatorUserId: creatorForDisplay.id,
+			kind,
+			uiCallType,
+			creatorDisplay: { name: creatorForDisplay.name, avatar: creatorForDisplay.avatar },
+		}).then(res => {
+			showToast('Session request sent. Waiting for creator…');
+		}).catch(err => {
+			showToast(err instanceof Error ? err.message : 'Failed to request session', 'error');
+		});
 	}
+
+	useEffect(() => {
+		if (sessionsState.outgoing.state === 'rejected') {
+			showToast(sessionsState.outgoing.rejected.message || 'Session rejected', 'error');
+		}
+		if (sessionsState.outgoing.state === 'accepted') {
+			showToast('Session accepted!');
+		}
+		return () => {
+			// clear on unmount / profile change
+			clearOutgoing();
+		};
+	}, [sessionsState.outgoing.state]);
 
 	function handleMessage() {
 		if (!authState.user) { navigate('/login'); return; }
@@ -423,6 +403,7 @@ export function CreatorProfile() {
 				ratePerMinute={creatorForDisplay.perMinuteRate}
 				walletBalanceMinor={authState.user?.walletBalanceMinor ?? '0'}
 				onConfirm={handleStartSession}
+				protocol="sessions"
 			/>
 		</Layout>
 	);

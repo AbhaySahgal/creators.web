@@ -5,6 +5,7 @@ import { Mic, MicOff, Video, VideoOff, Volume2, VolumeX, Phone, RotateCcw, Minim
 import { useCall } from '../../context/CallContext';
 import { useSession } from '../../context/SessionContext';
 import { useAuth } from '../../context/AuthContext';
+import { useSessions } from '../../context/SessionsContext';
 import { buildCallChannel, fetchAgoraRtcToken, getAgoraAppId, stringToAgoraUid } from '../../services/agoraRtc';
 import { formatINR } from '../../services/razorpay';
 
@@ -18,9 +19,11 @@ export function ActiveCallScreen() {
 	const navigate = useNavigate();
 	const { state: callState, endCall, toggleMute, toggleCamera, toggleSpeaker } = useCall();
 	const { state: sessionState, endSessionEarly } = useSession();
+	const { state: sessionsState, endSession: endBookedSession } = useSessions();
 	const { state: authState } = useAuth();
 	const call = callState.activeCall;
 	const session = sessionState.activeSession;
+	const sessionsBooking = sessionsState.active?.accepted?.kind === 'call' ? sessionsState.active : null;
 	const [elapsed, setElapsed] = useState(0);
 	const [showControls, setShowControls] = useState(true);
 	const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -39,10 +42,10 @@ export function ActiveCallScreen() {
 	const isWarning = isTimedSession && secondsRemaining <= 60 && secondsRemaining > 0;
 
 	useEffect(() => {
-		if (!call && !session) {
+		if (!call && !session && !sessionsBooking) {
 			navigate(-1);
 		}
-	}, [call, session, navigate]);
+	}, [call, session, sessionsBooking, navigate]);
 
 	useEffect(() => {
 		if (!isTimedSession && call?.status === 'active') {
@@ -77,6 +80,9 @@ export function ActiveCallScreen() {
 	}, [call?.type, session?.type]);
 
 	function handleEndCall() {
+		if (sessionsBooking?.accepted) {
+			void endBookedSession(sessionsBooking.accepted.request_id).catch(() => {});
+		}
 		if (isTimedSession) {
 			endSessionEarly();
 		}
@@ -84,9 +90,18 @@ export function ActiveCallScreen() {
 		navigate(-1);
 	}
 
-	const participantName = call?.participantName ?? session?.creatorName ?? '';
-	const participantAvatar = call?.participantAvatar ?? session?.creatorAvatar ?? '';
-	const callType = call?.type ?? session?.type;
+	const participantName =
+		call?.participantName ??
+		session?.creatorName ??
+		sessionsBooking?.otherDisplay?.name ??
+		'';
+	const participantAvatar =
+		call?.participantAvatar ??
+		session?.creatorAvatar ??
+		sessionsBooking?.otherDisplay?.avatar ??
+		'';
+	const bookingCallType = sessionsBooking?.uiCallType ?? 'video';
+	const callType = call?.type ?? session?.type ?? bookingCallType;
 	const callStatus = call?.status;
 	const isVideo = callType === 'video';
 	const isConnecting = callStatus === 'ringing' || callStatus === 'connecting';
@@ -100,14 +115,28 @@ export function ActiveCallScreen() {
 	const hideControls = !showControls && isVideo;
 
 	useEffect(() => {
-		if (!call || !authState.user) return;
+		if ((!call && !sessionsBooking) || !authState.user) return;
 
-		const participantId = call.participantId || session?.creatorId || 'unknown';
-		const channelName = buildCallChannel(authState.user.id, participantId);
-		const uid = stringToAgoraUid(authState.user.id);
-		const appId = getAgoraAppId();
+		const me = authState.user;
+		const participantId =
+			call?.participantId ||
+			session?.creatorId ||
+			(sessionsBooking?.accepted ? (sessionsBooking.otherDisplay ? 'other' : 'other') : 'unknown');
+
+		const bookingAgora = sessionsBooking?.accepted.agora ?? null;
+		const channelName =
+			bookingAgora?.channel_name ||
+			(sessionsBooking?.accepted.room_id ?? '') ||
+			buildCallChannel(me.id, participantId);
+		const uid = bookingAgora?.uid ?? stringToAgoraUid(me.id);
+		const appId = bookingAgora?.app_id ?? getAgoraAppId();
 		const client = AgoraRTC.createClient({ codec: 'vp8', mode: 'rtc' });
 		setAgoraError('');
+
+		if (bookingAgora?.dummy) {
+			setAgoraError('Call is in dummy mode (Agora not configured).');
+			return () => {};
+		}
 
 		client.on('user-published', (user, mediaType) => {
 			void client.subscribe(user, mediaType).then(() => {
@@ -139,10 +168,11 @@ export function ActiveCallScreen() {
 		});
 
 		void fetchAgoraRtcToken(channelName, uid, 'host').then(token => (
-			client.join(appId, channelName, token, uid).then(() => (
+			client.join(appId, channelName, bookingAgora?.token ?? token, uid).then(() => (
 				AgoraRTC.createMicrophoneAudioTrack().then(audioTrack => {
 					localAudioTrackRef.current = audioTrack;
-					if (call.type !== 'video') {
+					const audioOnly = (call?.type ?? callType) !== 'video';
+					if (audioOnly) {
 						return client.publish([audioTrack]);
 					}
 					return AgoraRTC.createCameraVideoTrack().then(videoTrack => {
@@ -173,7 +203,7 @@ export function ActiveCallScreen() {
 			if (localVideoTrack) localVideoTrack.close();
 			void leavePromise;
 		};
-	}, [authState.user, call?.id, call?.participantId, call?.type, session?.creatorId]);
+	}, [authState.user, call?.id, call?.participantId, call?.type, session?.creatorId, sessionsBooking?.accepted.request_id]);
 
 	useEffect(() => {
 		const localAudioTrack = localAudioTrackRef.current;
