@@ -13,7 +13,7 @@ export function ContactForm({ compact }: { compact?: boolean }) {
 	const [submitted, setSubmitted] = useState(false);
 
 	const reasonMeta = useMemo(() => {
-		const map: Record<ContactReason, { title: string; desc: string }> = {
+		const map: Record<ContactReason, { title: string, desc: string }> = {
 			support: { title: 'Support', desc: 'Account, login, payouts' },
 			partnership: { title: 'Partnership', desc: 'Creator onboarding' },
 			report: { title: 'Report', desc: 'Safety & content issues' },
@@ -102,7 +102,7 @@ export function ContactForm({ compact }: { compact?: boolean }) {
 			</div>
 
 			<form
-				onSubmit={(e) => {
+				onSubmit={e => {
 					e.preventDefault();
 					setSubmitted(true);
 				}}
@@ -168,4 +168,3 @@ export function ContactForm({ compact }: { compact?: boolean }) {
 		</div>
 	);
 }
-

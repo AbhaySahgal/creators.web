@@ -78,11 +78,9 @@ export function PrivacyPolicy() {
 						<section className="bg-surface border border-border/20 rounded-2xl p-5">
 							<h2 className="text-base font-semibold mb-2">Contact</h2>
 							<p className="text-sm text-muted leading-relaxed">
-								Questions about privacy? Contact us at{' '}
-								<a className="text-rose-400 hover:text-rose-300 transition-colors" href="mailto:support@creators.web">
+								Questions about privacy? Contact us at <a className="text-rose-400 hover:text-rose-300 transition-colors" href="mailto:support@creators.web">
 									support@creators.web
-								</a>
-								.
+								</a>.
 							</p>
 						</section>
 					</div>
@@ -91,4 +89,3 @@ export function PrivacyPolicy() {
 		</div>
 	);
 }
-
