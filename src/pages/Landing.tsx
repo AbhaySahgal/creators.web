@@ -4,6 +4,8 @@ import { Star, Shield, Zap, Users, TrendingUp, Lock, Play, ArrowRight, CheckCirc
 import { mockCreators } from '../data/users';
 import { useDragScroll } from '../hooks/useDragScroll';
 import { useTheme } from '../context/ThemeContext';
+import { MarketingFooter } from '../components/marketing/MarketingFooter';
+import { ContactForm } from '../components/marketing/ContactForm';
 
 export function Landing() {
 	const navigate = useNavigate();
@@ -213,17 +215,50 @@ export function Landing() {
 				</div>
 			</section>
 
-			<footer className="border-t border-border/10 py-8 px-4">
-				<div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-					<div className="flex items-center gap-2">
-						<div className="w-6 h-6 bg-rose-500 rounded-lg flex items-center justify-center">
-							<span className="text-white font-black text-[10px]">cw</span>
+			<section id="contact" className="py-16 px-4 bg-surface">
+				<div className="max-w-6xl mx-auto">
+					<div className="grid grid-cols-1 lg:grid-cols-5 gap-6 lg:gap-8 items-start">
+						<div className="lg:col-span-2">
+							<h2 className="text-2xl sm:text-3xl font-bold mb-2">Contact us</h2>
+							<p className="text-muted text-sm leading-relaxed mb-5">
+								Send us a message and choose the category that best matches your request.
+							</p>
+							<div className="bg-surface2 border border-border/20 rounded-2xl p-5">
+								<p className="text-sm font-semibold text-foreground mb-1.5">Prefer email?</p>
+								<p className="text-sm text-muted">
+									Write to{' '}
+									<a className="text-rose-400 hover:text-rose-300 transition-colors" href="mailto:support@creators.web">
+										support@creators.web
+									</a>
+									.
+								</p>
+								<div className="mt-4 flex flex-col sm:flex-row gap-3">
+									<button
+										type="button"
+										onClick={() => { void navigate('/contact'); }}
+										className="bg-foreground/10 hover:bg-foreground/15 text-foreground font-semibold px-5 py-2.5 rounded-2xl transition-all w-full sm:w-auto"
+									>
+										Open Contact page
+									</button>
+									<button
+										type="button"
+										onClick={() => { void navigate('/partner/apply'); }}
+										className="bg-rose-500 hover:bg-rose-600 text-white font-bold px-5 py-2.5 rounded-2xl transition-all active:scale-95 shadow-sm w-full sm:w-auto"
+									>
+										Partner apply
+									</button>
+								</div>
+							</div>
 						</div>
-						<span className="text-sm font-bold text-foreground">creators.web</span>
+
+						<div className="lg:col-span-3">
+							<ContactForm compact />
+						</div>
 					</div>
-					<p className="text-xs text-muted/80">© 2026 creators.web. All rights reserved. 18+ only.</p>
 				</div>
-			</footer>
+			</section>
+
+			<MarketingFooter />
 		</div>
 	);
 }
