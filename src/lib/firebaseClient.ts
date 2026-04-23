@@ -1,26 +1,35 @@
-import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
+import { initializeApp, getApps } from 'firebase/app';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirebaseConfig } from '../config/firebase';
 
-let firebaseApp: FirebaseApp | null = null;
-let firebaseAuth: Auth | null = null;
-let googleProvider: GoogleAuthProvider | null = null;
+type App = ReturnType<typeof initializeApp>;
+type AuthClient = ReturnType<typeof getAuth>;
 
-export function getFirebaseApp(): FirebaseApp {
-	if (firebaseApp) return firebaseApp;
+let firebaseApp!: App;
+let firebaseAuth!: AuthClient;
+let googleProvider!: GoogleAuthProvider;
+let firebaseAppInit = false;
+let firebaseAuthInit = false;
+let googleProviderInit = false;
+
+export function getFirebaseApp(): App {
+	if (firebaseAppInit) return firebaseApp;
 	firebaseApp = getApps()[0] ?? initializeApp(getFirebaseConfig());
+	firebaseAppInit = true;
 	return firebaseApp;
 }
 
-export function getFirebaseAuth(): Auth {
-	if (firebaseAuth) return firebaseAuth;
+export function getFirebaseAuth(): AuthClient {
+	if (firebaseAuthInit) return firebaseAuth;
 	firebaseAuth = getAuth(getFirebaseApp());
+	firebaseAuthInit = true;
 	return firebaseAuth;
 }
 
 export function getGoogleProvider(): GoogleAuthProvider {
-	if (googleProvider) return googleProvider;
+	if (googleProviderInit) return googleProvider;
 	googleProvider = new GoogleAuthProvider();
 	googleProvider.setCustomParameters({ prompt: 'select_account' });
+	googleProviderInit = true;
 	return googleProvider;
 }

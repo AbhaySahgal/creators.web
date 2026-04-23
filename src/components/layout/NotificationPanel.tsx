@@ -40,7 +40,7 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
 					<div className="text-center py-8 text-muted text-sm">No notifications</div>
 				) : (
 					notifications.map(n => {
-						const data = (n.data ?? {}) as Record<string, unknown>;
+						const data = n.data ?? {};
 						const link = typeof data.link === 'string' ? data.link : undefined;
 						const fromAvatar =
 							typeof data.from_avatar === 'string' ? data.from_avatar :

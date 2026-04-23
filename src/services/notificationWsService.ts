@@ -141,4 +141,3 @@ export function notificationReadAll(ws: WsClient, requestIdTag?: string): Promis
 	const rid = assertRequestIdTag(requestIdTag);
 	return ws.request(SVC, 'readall', [], rid).then(r => r as NotificationReadAllResponse);
 }
-
