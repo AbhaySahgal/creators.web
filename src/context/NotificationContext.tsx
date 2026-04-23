@@ -28,13 +28,13 @@ interface NotificationState {
 }
 
 type NotificationAction =
-	| { type: 'UPSERT_TOP', payload: Notification }
-	| { type: 'SET_PAGE', payload: { notifications: Notification[], nextCursor: string | null, replace: boolean } }
-	| { type: 'SET_UNREAD_COUNT', payload: number }
-	| { type: 'MARK_READ_LOCAL', payload: { id: string, readAt: string } }
-	| { type: 'MARK_UNREAD_LOCAL', payload: { id: string } }
-	| { type: 'MARK_ALL_READ_LOCAL', payload: { readAt: string } }
-	| { type: 'SET_STATUS', payload: { status: NotificationState['status'], error?: string } }
+	{ type: 'UPSERT_TOP', payload: Notification } |
+	{ type: 'SET_PAGE', payload: { notifications: Notification[], nextCursor: string | null, replace: boolean } } |
+	{ type: 'SET_UNREAD_COUNT', payload: number } |
+	{ type: 'MARK_READ_LOCAL', payload: { id: string, readAt: string } } |
+	{ type: 'MARK_UNREAD_LOCAL', payload: { id: string } } |
+	{ type: 'MARK_ALL_READ_LOCAL', payload: { readAt: string } } |
+	{ type: 'SET_STATUS', payload: { status: NotificationState['status'], error?: string } } |
 	{ type: 'ADD_TOAST', payload: ToastItem } |
 	{ type: 'REMOVE_TOAST', payload: string };
 
@@ -55,7 +55,7 @@ function normalizeRow(row: InAppNotificationRow): Notification {
 		id: String(row.id),
 		title: String(row.title ?? ''),
 		body: row.body == null ? null : String(row.body),
-		data: (row.data ?? {}) as Record<string, unknown>,
+		data: row.data ?? {},
 		created_at: String(row.created_at),
 		read_at: row.read_at == null ? null : String(row.read_at),
 	};
@@ -63,10 +63,11 @@ function normalizeRow(row: InAppNotificationRow): Notification {
 
 function mergeUnique(existing: Notification[], incoming: Notification[]): Notification[] {
 	const next = [...existing];
-	const seen = new Set(existing.map(n => n.id));
+	const seen: Record<string, true> = {};
+	for (const n of existing) seen[n.id] = true;
 	for (const n of incoming) {
-		if (!seen.has(n.id)) {
-			seen.add(n.id);
+		if (!seen[n.id]) {
+			seen[n.id] = true;
 			next.push(n);
 		}
 	}
@@ -216,15 +217,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 		setTimeout(() => dispatch({ type: 'REMOVE_TOAST', payload: id }), 4000);
 	}, []);
 
-	const getUserNotifications = useCallback((userId: string) => {
+	const getUserNotifications = useCallback((_userId: string) => {
 		// Notifications are scoped server-side to the authenticated socket user.
 		// Keep the param to avoid refactors across the UI.
-		void userId;
+		void _userId;
 		return state.notifications;
 	}, [state.notifications]);
 
-	const getUnreadCount = useCallback((userId: string) => {
-		void userId;
+	const getUnreadCount = useCallback((_userId: string) => {
+		void _userId;
 		return state.unreadCount;
 	}, [state.unreadCount]);
 
@@ -233,37 +234,41 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 		dispatch({ type: 'SET_PAGE', payload: { notifications: page, nextCursor: res.next_cursor ?? null, replace } });
 	}, []);
 
-	const refresh = useCallback(async (opts?: { unreadOnly?: boolean }) => {
+	const refresh = useCallback((opts?: { unreadOnly?: boolean }): Promise<void> => {
 		if (!wsConnected || !userId) return;
 		fetchSeqRef.current += 1;
 		const seq = fetchSeqRef.current;
 		dispatch({ type: 'SET_STATUS', payload: { status: 'loading' } });
-		try {
-			const [countRes, listRes] = await Promise.all([
-				notificationUnreadCount(ws),
-				notificationList(ws, { unreadOnly: opts?.unreadOnly, limit: 30 }),
-			]);
-			if (seq !== fetchSeqRef.current) return;
-			dispatch({ type: 'SET_UNREAD_COUNT', payload: countRes.unread_count });
-			applyListResponse(listRes, true);
-			dispatch({ type: 'SET_STATUS', payload: { status: 'ready' } });
-		} catch (e) {
-			if (seq !== fetchSeqRef.current) return;
-			const msg = e instanceof Error ? e.message : 'Failed to load notifications';
-			dispatch({ type: 'SET_STATUS', payload: { status: 'error', error: msg } });
-		}
+		return Promise.all([
+			notificationUnreadCount(ws),
+			notificationList(ws, { unreadOnly: opts?.unreadOnly, limit: 30 }),
+		]).then(
+			([countRes, listRes]) => {
+				if (seq !== fetchSeqRef.current) return;
+				dispatch({ type: 'SET_UNREAD_COUNT', payload: countRes.unread_count });
+				applyListResponse(listRes, true);
+				dispatch({ type: 'SET_STATUS', payload: { status: 'ready' } });
+			},
+			(e: unknown) => {
+				if (seq !== fetchSeqRef.current) return;
+				const msg = e instanceof Error ? e.message : 'Failed to load notifications';
+				dispatch({ type: 'SET_STATUS', payload: { status: 'error', error: msg } });
+			}
+		);
 	}, [applyListResponse, userId, ws, wsConnected]);
 
-	const loadMore = useCallback(async () => {
+	const loadMore = useCallback((): Promise<void> => {
 		if (!wsConnected || !userId) return;
 		const cursor = state.nextCursor;
 		if (!cursor) return;
-		try {
-			const res = await notificationList(ws, { limit: 30, beforeCursor: cursor });
-			applyListResponse(res, false);
-		} catch {
-			// ignore pagination failures
-		}
+		return notificationList(ws, { limit: 30, beforeCursor: cursor }).then(
+			res => {
+				applyListResponse(res, false);
+			},
+			() => {
+				// ignore pagination failures
+			}
+		);
 	}, [applyListResponse, state.nextCursor, userId, ws, wsConnected]);
 
 	// Initial load + reload on login / reconnect.
@@ -277,12 +282,12 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 		if (!userId) return;
 		const off = ws.on('notification', 'new', data => {
 			const row = data as Partial<InAppNotificationRow>;
-			if (!row || row.id == null) return;
+			if (row?.id == null) return;
 			const normalized = normalizeRow({
 				id: String(row.id),
 				title: String(row.title ?? ''),
 				body: row.body == null ? null : String(row.body),
-				data: (row.data ?? {}) as Record<string, unknown>,
+				data: row.data ?? {},
 				created_at: String(row.created_at ?? new Date().toISOString()),
 				read_at: row.read_at == null ? null : String(row.read_at),
 			});
