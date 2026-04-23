@@ -81,13 +81,11 @@ export function ProfileEditor() {
 			)
 			.then(({ user }) => {
 				updateUser(user);
-				if (!isPostsMockMode()) {
-					void creatorWsUpsert(
-						username.trim() || creatorData.username,
-						name.trim() || creatorData.name,
-						bio.trim() || undefined
-					).catch(() => {});
-				}
+				void creatorWsUpsert(
+					username.trim() || creatorData.username,
+					name.trim() || creatorData.name,
+					bio.trim() || undefined
+				).catch(() => {});
 				showToast('Profile updated!');
 				setAvatarFile(null);
 				setBannerFile(null);
