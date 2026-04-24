@@ -16,12 +16,10 @@ export function Login() {
 	function handleLogin(e: React.FormEvent) {
 		e.preventDefault();
 		setIsLoading(true);
-		void login(email, password).then(success => {
+		void login(email, password).then(user => {
 			setIsLoading(false);
-			if (success) {
-				const role = email.toLowerCase() === DEMO_ACCOUNTS.admin.email ? 'admin' :
-					email.toLowerCase() === DEMO_ACCOUNTS.creator.email ? 'creator' : 'fan';
-				void navigate(role === 'admin' ? '/admin' : role === 'creator' ? '/creator-dashboard' : '/feed');
+			if (user) {
+				void navigate(user.role === 'admin' ? '/admin' : user.role === 'creator' ? '/creator-dashboard' : '/feed');
 			}
 		});
 	}

@@ -1,11 +1,13 @@
-import React, { createContext, useCallback, useContext, useReducer } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useReducer } from 'react';
 import { signInWithPopup, signOut as firebaseSignOut, type User as FirebaseUser } from 'firebase/auth';
 import type { User, Creator } from '../types';
-import { mockCreators, mockFanUser, mockAdminUser, DEMO_ACCOUNTS } from '../data/users';
-import { delayMs } from '../utils/delay';
 import { firebaseMissingConfigKeys, isFirebaseConfigured } from '../config/firebase';
 import { getFirebaseAuth, getGoogleProvider } from '../lib/firebaseClient';
 import { exchangeFirebaseToken } from '../services/authApi';
+import { clearAccessToken, getAccessToken, setAccessToken } from '../services/auth/tokenStore';
+import { syncWsTokenFromStorage } from '../services/ws/client';
+import * as authHttp from '../services/http/auth';
+import { isHttpError } from '../services/http/errors';
 
 interface AuthState {
 	user: User | null;
@@ -111,7 +113,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 					state.creatorProfiles,
 			};
 		case 'UPDATE_CREATOR_PROFILE':
-			if (!state.user || state.user.role !== 'creator') return state;
+			if (state.user?.role !== 'creator') return state;
 			return {
 				...state,
 				creatorProfiles: {
@@ -130,7 +132,8 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 
 interface AuthContextValue {
 	state: AuthState;
-	login: (email: string, password: string) => Promise<boolean>;
+	login: (email: string, password: string) => Promise<User | null>;
+	register: (email: string, password: string, displayName: string, desiredRole?: 'fan' | 'creator') => Promise<User | null>;
 	loginWithGoogle: (preferredRole?: 'fan' | 'creator') => Promise<User | null>;
 	logout: () => void;
 	verifyAge: () => void;
@@ -148,6 +151,14 @@ function normalizeUsername(input: string): string {
 		.toLowerCase()
 		.replace(/[^a-z0-9]/g, '')
 		.slice(0, 20) || 'user';
+}
+
+function normalizeApiUser(apiUser: User): User {
+	return {
+		...apiUser,
+		avatar: apiUser.avatar || 'https://images.pexels.com/photos/1040880/pexels-photo-1040880.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop',
+		username: apiUser.username || normalizeUsername(apiUser.name || apiUser.email),
+	};
 }
 
 function createFallbackGoogleUser(firebaseUser: FirebaseUser, preferredRole: 'fan' | 'creator'): User {
@@ -171,29 +182,52 @@ function createFallbackGoogleUser(firebaseUser: FirebaseUser, preferredRole: 'fa
 export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [state, dispatch] = useReducer(authReducer, initialState);
 
-	const login = useCallback((email: string, password: string): Promise<boolean> => {
+	const login = useCallback((email: string, password: string): Promise<User | null> => {
 		dispatch({ type: 'CLEAR_ERROR' });
-		return delayMs(800).then(() => {
-			const emailLower = email.toLowerCase().trim();
-
-			if (emailLower === DEMO_ACCOUNTS.fan.email && password === DEMO_ACCOUNTS.fan.password) {
-				dispatch({ type: 'LOGIN', payload: mockFanUser });
-				return true;
+		return authHttp.login({ email, password }).then(({ token }) => {
+			setAccessToken(token);
+			syncWsTokenFromStorage();
+			return authHttp.getMe();
+		}).then(({ user }) => {
+			if (!user) throw new Error('Login succeeded but user is null');
+			const normalized = normalizeApiUser(user);
+			dispatch({ type: 'LOGIN', payload: normalized });
+			return normalized;
+		}).catch(err => {
+			if (isHttpError(err) && err.status === 401) {
+				dispatch({ type: 'SET_ERROR', payload: 'Invalid email or password.' });
+				return null;
 			}
+			const message = err instanceof Error ? err.message : 'Login failed. Please try again.';
+			dispatch({ type: 'SET_ERROR', payload: message });
+			return null;
+		});
+	}, []);
 
-			if (emailLower === DEMO_ACCOUNTS.creator.email && password === DEMO_ACCOUNTS.creator.password) {
-				const creatorUser = mockCreators[0];
-				dispatch({ type: 'LOGIN', payload: creatorUser });
-				return true;
+	const register = useCallback((
+		email: string,
+		password: string,
+		displayName: string,
+		desiredRole: 'fan' | 'creator' = 'fan'
+	): Promise<User | null> => {
+		dispatch({ type: 'CLEAR_ERROR' });
+		return authHttp.register({ email, password, displayName }).then(({ token }) => {
+			setAccessToken(token);
+			syncWsTokenFromStorage();
+			return authHttp.getMe();
+		}).then(({ user }) => {
+			if (!user) throw new Error('Registration succeeded but user is null');
+			const normalized = normalizeApiUser(user);
+			dispatch({ type: 'LOGIN', payload: normalized });
+			if (desiredRole === 'creator') {
+				// Backend promotes to creator via creator service upsertprofile; UI may trigger this later.
+				dispatch({ type: 'UPDATE_CREATOR_PROFILE', payload: createCreatorProfileFromUser(normalized) });
 			}
-
-			if (emailLower === DEMO_ACCOUNTS.admin.email && password === DEMO_ACCOUNTS.admin.password) {
-				dispatch({ type: 'LOGIN', payload: mockAdminUser });
-				return true;
-			}
-
-			dispatch({ type: 'SET_ERROR', payload: 'Invalid email or password. Try the demo accounts!' });
-			return false;
+			return normalized;
+		}).catch(err => {
+			const message = err instanceof Error ? err.message : 'Registration failed. Please try again.';
+			dispatch({ type: 'SET_ERROR', payload: message });
+			return null;
 		});
 	}, []);
 
@@ -212,9 +246,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		const provider = getGoogleProvider();
 		return signInWithPopup(auth, provider).then(credential => (
 			credential.user.getIdToken().then(idToken => (
-				exchangeFirebaseToken(idToken, preferredRole).then(user => {
-					const resolvedUser = user ?? createFallbackGoogleUser(credential.user, preferredRole);
-					dispatch({ type: 'LOGIN', payload: resolvedUser });
+				exchangeFirebaseToken(idToken, preferredRole).then(result => {
+					const resolvedUser = result?.user ?? createFallbackGoogleUser(credential.user, preferredRole);
+					if (result?.token) {
+						setAccessToken(result.token);
+						syncWsTokenFromStorage();
+					}
+					dispatch({ type: 'LOGIN', payload: normalizeApiUser(resolvedUser) });
 					return resolvedUser;
 				})
 			))
@@ -226,6 +264,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	}, []);
 
 	const logout = useCallback(() => {
+		void authHttp.logout().catch(() => {
+			// Stateless logout: ignore failures.
+		});
+		clearAccessToken();
+		syncWsTokenFromStorage();
 		dispatch({ type: 'LOGOUT' });
 
 		if (!isFirebaseConfigured) return;
@@ -258,11 +301,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		dispatch({ type: 'CLEAR_ERROR' });
 	}, []);
 
+	useEffect(() => {
+		const token = getAccessToken();
+		if (!token) return;
+		syncWsTokenFromStorage();
+		void authHttp.getMe().then(({ user }) => {
+			if (user) dispatch({ type: 'LOGIN', payload: normalizeApiUser(user) });
+		}).catch(() => {
+			// Token invalid/expired: drop it silently.
+			clearAccessToken();
+			syncWsTokenFromStorage();
+		});
+	}, []);
+
 	return (
 		<AuthContext.Provider
 			value={{
 				state,
 				login,
+				register,
 				loginWithGoogle,
 				logout,
 				verifyAge,
@@ -286,7 +343,7 @@ export function useAuth() {
 
 export function useCurrentCreator(): Creator | null {
 	const { state } = useAuth();
-	if (!state.user || state.user.role !== 'creator') return null;
 	const currentUser = state.user;
-	return state.creatorProfiles[currentUser.id] ?? mockCreators.find(c => c.id === currentUser.id) ?? mockCreators[0];
+	if (currentUser?.role !== 'creator') return null;
+	return state.creatorProfiles[currentUser.id] ?? createCreatorProfileFromUser(currentUser);
 }

@@ -3,11 +3,10 @@ import { useNavigate, Link } from 'react-router-dom';
 import { User, Mail, Lock, Eye, EyeOff, Camera, Video, ArrowRight, Chrome } from '../../components/icons';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
-import { delayMs } from '../../utils/delay';
 
 export function Register() {
 	const navigate = useNavigate();
-	const { setPendingEmail, loginWithGoogle, state } = useAuth();
+	const { register, loginWithGoogle, state } = useAuth();
 	const [step, setStep] = useState<1 | 2>(1);
 	const [role, setRole] = useState<'fan' | 'creator'>('fan');
 	const [name, setName] = useState('');
@@ -20,10 +19,11 @@ export function Register() {
 		e.preventDefault();
 		if (step === 1) { setStep(2); return; }
 		setIsLoading(true);
-		void delayMs(1000).then(() => {
-			setPendingEmail(email);
-			void navigate('/otp');
+		void register(email, password, name, role).then(user => {
 			setIsLoading(false);
+			if (user) {
+				void navigate(user.role === 'admin' ? '/admin' : user.role === 'creator' ? '/creator-dashboard' : '/feed');
+			}
 		});
 	}
 
