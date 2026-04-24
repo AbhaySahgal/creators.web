@@ -160,6 +160,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 	const uiCallTypeByRequestIdRef = useRef<Record<string, SessionsUiCallType>>({});
 	const creatorMetaByRequestIdRef = useRef<Record<string, { userId: string, name: string, avatar: string }>>({});
 	const fanMetaByRequestIdRef = useRef<Record<string, { userId: string, name: string }>>({});
+	const roomIdByRequestIdRef = useRef<Record<string, string>>({});
 
 	const requestSession = useCallback(
 		(opts: {
@@ -273,6 +274,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 		});
 		const offAccepted = ws.on('sessions', 'accepted', data => {
 			const payload = data as SessionsAcceptedPayload;
+			roomIdByRequestIdRef.current[payload.request_id] = payload.room_id;
 			const me = authState.user;
 			const creatorMeta = creatorMetaByRequestIdRef.current[payload.request_id];
 			const fanMeta = fanMetaByRequestIdRef.current[payload.request_id];
@@ -296,6 +298,22 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 		});
 		const offPrompt = ws.on('sessions', 'feedbackprompt', data => {
 			const payload = data as SessionsFeedbackPromptEvent;
+			// Ensure "session ended" UI is visible on both sides even if `sessions|ended`
+			// arrives late or was missed; the feedback prompt implies completion.
+			const active = state.active?.accepted;
+			const roomId =
+				active && active.request_id === payload.request_id ?
+					active.room_id :
+					roomIdByRequestIdRef.current[payload.request_id];
+			if (roomId) {
+				dispatch({
+					type: 'ENDED_SET',
+					payload: { request_id: payload.request_id, room_id: roomId, reason: 'manual' },
+				});
+				if (active && active.room_id === roomId) {
+					dispatch({ type: 'ACTIVE_CLEAR' });
+				}
+			}
 			dispatch({ type: 'FEEDBACK_PROMPT', payload });
 		});
 		const offReceived = ws.on('sessions', 'feedbackreceived', data => {

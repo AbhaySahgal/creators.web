@@ -16,6 +16,7 @@ import { ToastContainer } from '../../components/ui/Toast';
 import { Navbar } from '../../components/layout/Navbar';
 import { useRoomChat } from '../../hooks/useRoomChat';
 import { formatINR } from '../../services/razorpay';
+import { SessionFeedbackModal } from '../../components/session/SessionFeedbackModal';
 
 function formatRemaining(sec: number): string {
 	if (!Number.isFinite(sec)) return '—';
@@ -333,14 +334,6 @@ export function ChatRoom() {
 
 			<div className="flex-1 pt-28 pb-20 overflow-y-auto">
 				<div className="max-w-2xl mx-auto px-4 space-y-3 py-4">
-					{endedChatBooking && (
-						<div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3">
-							<p className="text-sm font-semibold text-rose-200">Session ended</p>
-							<p className="text-xs text-rose-200/80 mt-0.5">
-								You can still view messages, but sending is disabled.
-							</p>
-						</div>
-					)}
 					{messages.map(msg => {
 						const isMe = msg.senderId === userId;
 						return (
@@ -449,6 +442,7 @@ export function ChatRoom() {
 				creatorName={otherName}
 				creatorAvatar={otherAvatar}
 			/>
+			<SessionFeedbackModal />
 		</div>
 	);
 }
