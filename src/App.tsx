@@ -8,6 +8,7 @@ import { NotificationProvider } from './context/NotificationContext';
 import { CallProvider } from './context/CallContext';
 import { SessionProvider } from './context/SessionContext';
 import { LiveStreamProvider } from './context/LiveStreamContext';
+import { SessionsWsProvider } from './context/SessionsWsContext';
 
 import { Landing } from './pages/Landing';
 import { Login } from './pages/auth/Login';
@@ -42,6 +43,7 @@ import { CallHistory } from './pages/call/CallHistory';
 import { TimedChatRoom } from './pages/session/TimedChatRoom';
 import { LiveStreamRoom } from './pages/live/LiveStreamRoom';
 import { GoLivePage } from './pages/live/GoLivePage';
+import { IncomingSessionRequestOverlay } from './components/session/IncomingSessionRequestOverlay';
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
 	constructor(props: { children: React.ReactNode }) {
@@ -132,7 +134,7 @@ function AppRoutes() {
 			<Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
 			<Route path="/call" element={<ProtectedRoute><ActiveCallScreen /></ProtectedRoute>} />
 			<Route path="/call-history" element={<ProtectedRoute><CallHistory /></ProtectedRoute>} />
-			<Route path="/session/chat/:creatorId" element={<ProtectedRoute><TimedChatRoom /></ProtectedRoute>} />
+			<Route path="/session/chat/:requestId" element={<ProtectedRoute><TimedChatRoom /></ProtectedRoute>} />
 			<Route path="/live/:streamId" element={<ProtectedRoute><LiveStreamRoom /></ProtectedRoute>} />
 			<Route path="/go-live" element={<ProtectedRoute roles={['creator']}><GoLivePage /></ProtectedRoute>} />
 
@@ -146,19 +148,21 @@ function Providers({ children }: { children: React.ReactNode }) {
 		<BrowserRouter>
 			<AuthProvider>
 				<NotificationProvider>
-					<ContentProvider>
-						<ChatProvider>
-							<WalletProvider>
-								<CallProvider>
-									<SessionProvider>
-										<LiveStreamProvider>
-											{children}
-										</LiveStreamProvider>
-									</SessionProvider>
-								</CallProvider>
-							</WalletProvider>
-						</ChatProvider>
-					</ContentProvider>
+					<SessionsWsProvider>
+						<ContentProvider>
+							<ChatProvider>
+								<WalletProvider>
+									<CallProvider>
+										<SessionProvider>
+											<LiveStreamProvider>
+												{children}
+											</LiveStreamProvider>
+										</SessionProvider>
+									</CallProvider>
+								</WalletProvider>
+							</ChatProvider>
+						</ContentProvider>
+					</SessionsWsProvider>
 				</NotificationProvider>
 			</AuthProvider>
 		</BrowserRouter>
@@ -170,6 +174,7 @@ export default function App() {
 		<Providers>
 			<ErrorBoundary>
 				<AppRoutes />
+				<IncomingSessionRequestOverlay />
 			</ErrorBoundary>
 		</Providers>
 	);

@@ -13,6 +13,7 @@ import { useChat } from '../../context/ChatContext';
 import { useCall } from '../../context/CallContext';
 import { useSession } from '../../context/SessionContext';
 import { useWallet } from '../../context/WalletContext';
+import { useSessionsWs } from '../../context/SessionsWsContext';
 import { SessionPickerModal, type SessionPayMode } from '../../components/modals/SessionPickerModal';
 import type { SessionType } from '../../types';
 
@@ -26,10 +27,12 @@ export function CreatorProfile() {
 	const { startCall } = useCall();
 	const { startSession } = useSession();
 	const { deductFunds, payViaRazorpay } = useWallet();
+	const { requestChat } = useSessionsWs();
 	const [showTipModal, setShowTipModal] = useState(false);
 	const [showSubscribeModal, setShowSubscribeModal] = useState(false);
 	const [showSessionModal, setShowSessionModal] = useState(false);
 	const [postFilter, setPostFilter] = useState<'all' | 'free' | 'locked'>('all');
+	const [bookingPending, setBookingPending] = useState(false);
 
 	const maybeCreator = mockCreators.find(c => c.id === id);
 
@@ -61,7 +64,16 @@ export function CreatorProfile() {
 		const userId = authState.user.id;
 		const userName = authState.user.name;
 
-		const startAndNavigate = () => {
+		const startAndNavigate = (requestIdForChat?: string) => {
+			// Calls are still locally simulated for now; only timed chat is WS-backed.
+			if (type === 'chat') {
+				if (requestIdForChat) {
+					void navigate(`/session/chat/${requestIdForChat}`);
+					return;
+				}
+				return;
+			}
+
 			startSession(
 				type,
 				creator.id,
@@ -72,12 +84,6 @@ export function CreatorProfile() {
 				durationMinutes,
 				creator.perMinuteRate
 			);
-
-			if (type === 'chat') {
-				void navigate(`/session/chat/${creator.id}`);
-				return;
-			}
-
 			startCall(creator.id, creator.name, creator.avatar, type);
 			void navigate('/call');
 		};
@@ -94,8 +100,22 @@ export function CreatorProfile() {
 					if (!result.cancelled) showToast(result.error || 'Payment failed.', 'error');
 					return;
 				}
+				if (type === 'chat') {
+					setBookingPending(true);
+					requestChat(creator.id, durationMinutes)
+						.then(resp => {
+							showToast('Chat request sent. Waiting for creator to accept…', 'info');
+							startAndNavigate(resp.request_id);
+						})
+						.catch(err => {
+							const msg = err instanceof Error ? err.message : 'Failed to request chat session';
+							showToast(msg, 'error');
+						})
+						.finally(() => setBookingPending(false));
+					return;
+				}
 
-				startAndNavigate();
+				startAndNavigate(undefined);
 			});
 			return;
 		}
@@ -105,8 +125,22 @@ export function CreatorProfile() {
 			showToast('Insufficient wallet balance.', 'error');
 			return;
 		}
+		if (type === 'chat') {
+			setBookingPending(true);
+			requestChat(creator.id, durationMinutes)
+				.then(resp => {
+					showToast('Chat request sent. Waiting for creator to accept…', 'info');
+					startAndNavigate(resp.request_id);
+				})
+				.catch(err => {
+					const msg = err instanceof Error ? err.message : 'Failed to request chat session';
+					showToast(msg, 'error');
+				})
+				.finally(() => setBookingPending(false));
+			return;
+		}
 
-		startAndNavigate();
+		startAndNavigate(undefined);
 	}
 
 	function handleMessage() {
@@ -328,6 +362,16 @@ export function CreatorProfile() {
 				walletBalance={authState.user?.walletBalance ?? 0}
 				onConfirm={handleStartSession}
 			/>
+
+			{bookingPending && (
+				<div className="fixed inset-0 z-[300] flex items-center justify-center">
+					<div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+					<div className="relative bg-[#141414] border border-white/10 rounded-2xl px-5 py-4 text-center max-w-sm w-[92%]">
+						<p className="text-sm font-semibold text-white mb-1">Requesting timed chat…</p>
+						<p className="text-xs text-white/40">Connecting to sessions service and creating booking.</p>
+					</div>
+				</div>
+			)}
 		</Layout>
 	);
 }

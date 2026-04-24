@@ -1,0 +1,14 @@
+name: Creators API Env
+values:
+  - key: base_url
+    enabled: true
+    value: 'https://creatorsapi.pnine.me'
+  - key: token
+    enabled: true
+    value: ''
+  - key: ws_url
+    enabled: true
+    value: 'wss://creatorsapi.pnine.me/'
+  - key: token_viewer
+    enabled: true
+    value: ''
