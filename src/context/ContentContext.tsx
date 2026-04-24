@@ -40,6 +40,8 @@ import { useAuth } from './AuthContext';
 
 export type PostsWsStatus = 'idle' | 'connecting' | 'ready' | 'error';
 
+const mockMode = import.meta.env.VITE_POSTS_MOCK === 'true';
+
 export interface CreatePostInput {
 	visibility: 'public' | 'subscribers' | 'ppv';
 	text: string;
