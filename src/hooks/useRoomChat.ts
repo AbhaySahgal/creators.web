@@ -8,7 +8,7 @@ import {
 	chatSendMsg,
 	chatTyping,
 } from '../services/chatWsService';
-import type { ChatMessageDTO, ChatTypingEventPayload } from '../services/chatWsTypes';
+import type { ChatMessageDTO, ChatPresenceEventPayload, ChatSeenEventPayload, ChatTypingEventPayload } from '../services/chatWsTypes';
 import type { Message } from '../types';
 import { isUuid } from '../utils/isUuid';
 
@@ -48,6 +48,8 @@ export interface UseRoomChatParams {
 	getParticipantMeta: (userId: string) => { name: string, avatar: string };
 	upsertRoomMessages: (conversationId: string, messages: Message[]) => void;
 	addRoomMessage: (message: Message) => void;
+	onPresenceEvent?: (ev: { type: 'join' | 'leave', room_id: string, user_id: string }) => void;
+	onSeenEvent?: (payload: ChatSeenEventPayload) => void;
 	onProtocolError?: (message: string) => void;
 	/** If true, uses `/sendmsg` ack response to immediately add the sender's message to UI. */
 	sendWithAck?: boolean;
@@ -73,6 +75,8 @@ export interface UseRoomChatResult {
 	 * - When `sendWithAck` is false, returns `undefined` (delivery via `chat|newmessage`).
 	 */
 	sendRealtime: (text: string) => Promise<ChatMessageDTO | undefined>;
+	/** Send a seen receipt for the given message id (best-effort). */
+	sendSeen: (lastMessageId: string) => void;
 }
 
 const TYPING_DEBOUNCE_MS = 400;
@@ -85,6 +89,8 @@ export function useRoomChat(params: UseRoomChatParams): UseRoomChatResult {
 		getParticipantMeta,
 		upsertRoomMessages,
 		addRoomMessage,
+		onPresenceEvent,
+		onSeenEvent,
 		onProtocolError,
 		sendWithAck = false,
 		transport = 'auto',
@@ -112,10 +118,14 @@ export function useRoomChat(params: UseRoomChatParams): UseRoomChatResult {
 	const addRef = useRef(addRoomMessage);
 	const metaRef = useRef(getParticipantMeta);
 	const userRef = useRef(currentUserId);
+	const presenceRef = useRef(onPresenceEvent);
+	const seenRef = useRef(onSeenEvent);
 	upsertRef.current = upsertRoomMessages;
 	addRef.current = addRoomMessage;
 	metaRef.current = getParticipantMeta;
 	userRef.current = currentUserId;
+	presenceRef.current = onPresenceEvent;
+	seenRef.current = onSeenEvent;
 
 	useEffect(() => {
 		if (!realtimeActive || !roomUuid) return;
@@ -123,11 +133,29 @@ export function useRoomChat(params: UseRoomChatParams): UseRoomChatResult {
 		let cancelled = false;
 
 		if (effectiveTransport === 'ws') {
-			const offEv = ws.on('chat', 'newmessage', data => {
+			const offMsg = ws.on('chat', 'c', data => {
 				if (cancelled || roomRef.current !== roomUuid) return;
 				const dto = data as ChatMessageDTO;
 				if (dto.room_id !== roomUuid) return;
 				addRef.current(dtoToMessage(dto, metaRef.current));
+			});
+			const offJoin = ws.on('chat', 'j', data => {
+				if (cancelled || roomRef.current !== roomUuid) return;
+				const pl = data as ChatPresenceEventPayload;
+				if (pl.room_id !== roomUuid || pl.user_id === userRef.current) return;
+				presenceRef.current?.({ type: 'join', room_id: pl.room_id, user_id: pl.user_id });
+			});
+			const offLeave = ws.on('chat', 'l', data => {
+				if (cancelled || roomRef.current !== roomUuid) return;
+				const pl = data as ChatPresenceEventPayload;
+				if (pl.room_id !== roomUuid || pl.user_id === userRef.current) return;
+				presenceRef.current?.({ type: 'leave', room_id: pl.room_id, user_id: pl.user_id });
+			});
+			const offSeen = ws.on('chat', 'seen', data => {
+				if (cancelled || roomRef.current !== roomUuid) return;
+				const pl = data as ChatSeenEventPayload;
+				if (pl.room_id !== roomUuid || pl.user_id === userRef.current) return;
+				seenRef.current?.(pl);
 			});
 			const offTyping = ws.on('chat', 'typing', data => {
 				if (cancelled || roomRef.current !== roomUuid) return;
@@ -157,7 +185,10 @@ export function useRoomChat(params: UseRoomChatParams): UseRoomChatResult {
 
 			return () => {
 				cancelled = true;
-				offEv();
+				offMsg();
+				offJoin();
+				offLeave();
+				offSeen();
 				offTyping();
 				if (typingClearTimerRef.current) clearTimeout(typingClearTimerRef.current);
 				if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
@@ -174,10 +205,28 @@ export function useRoomChat(params: UseRoomChatParams): UseRoomChatResult {
 
 		const unsubEv = client.subscribeChatEvents((event, payload) => {
 			if (cancelled || roomRef.current !== roomUuid) return;
-			if (event === 'newmessage') {
+			if (event === 'c') {
 				const dto = payload as ChatMessageDTO;
 				if (dto.room_id !== roomUuid) return;
 				addRef.current(dtoToMessage(dto, metaRef.current));
+				return;
+			}
+			if (event === 'j') {
+				const pl = payload as ChatPresenceEventPayload;
+				if (pl.room_id !== roomUuid || pl.user_id === userRef.current) return;
+				presenceRef.current?.({ type: 'join', room_id: pl.room_id, user_id: pl.user_id });
+				return;
+			}
+			if (event === 'l') {
+				const pl = payload as ChatPresenceEventPayload;
+				if (pl.room_id !== roomUuid || pl.user_id === userRef.current) return;
+				presenceRef.current?.({ type: 'leave', room_id: pl.room_id, user_id: pl.user_id });
+				return;
+			}
+			if (event === 'seen') {
+				const pl = payload as ChatSeenEventPayload;
+				if (pl.room_id !== roomUuid || pl.user_id === userRef.current) return;
+				seenRef.current?.(pl);
 				return;
 			}
 			if (event === 'typing') {
@@ -286,5 +335,22 @@ export function useRoomChat(params: UseRoomChatParams): UseRoomChatResult {
 		[realtimeActive, roomUuid, notifyTyping, sendWithAck, effectiveTransport, ws]
 	);
 
-	return { otherTyping, realtimeActive, notifyTyping, sendRealtime };
+	const sendSeen = useCallback(
+		(lastMessageId: string) => {
+			if (!realtimeActive || !roomUuid) return;
+			const mid = (lastMessageId ?? '').trim();
+			if (!/^\d+$/.test(mid)) return;
+
+			if (effectiveTransport === 'ws') {
+				void ws.request('chat', 'seen', [roomUuid, mid]).catch(() => {});
+				return;
+			}
+			const client = getCreatorsMultiplexSingleton();
+			if (!client?.isOpen()) return;
+			void client.send('chat', `/seen ${roomUuid} ${mid}`).catch(() => {});
+		},
+		[realtimeActive, roomUuid, effectiveTransport, ws]
+	);
+
+	return { otherTyping, realtimeActive, notifyTyping, sendRealtime, sendSeen };
 }

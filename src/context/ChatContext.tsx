@@ -12,6 +12,7 @@ type ChatAction =
 	| { type: 'SEND_MESSAGE', payload: Message } |
 	{ type: 'UNLOCK_MESSAGE', payload: { messageId: string, conversationId: string } } |
 	{ type: 'MARK_READ', payload: string } |
+	{ type: 'MARK_SEEN_UP_TO', payload: { conversationId: string, lastMessageId: string } } |
 	{ type: 'SET_ACTIVE', payload: string | null } |
 	{ type: 'ADD_CONVERSATION', payload: Conversation } |
 	{ type: 'UPSERT_ROOM_MESSAGES', payload: { conversationId: string, messages: Message[] } } |
@@ -63,6 +64,20 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 					[action.payload]: (state.messages[action.payload] ?? []).map(m => ({ ...m, isSeen: true })),
 				},
 			};
+		}
+		case 'MARK_SEEN_UP_TO': {
+			const { conversationId, lastMessageId } = action.payload;
+			const existing = state.messages[conversationId] ?? [];
+			if (!/^\d+$/.test(lastMessageId)) return state;
+			const cutoff = Number(lastMessageId);
+			const next = existing.map(m => {
+				// only server ids can be compared numerically; skip local optimistic ids
+				if (!/^\d+$/.test(m.id)) return m;
+				const mid = Number(m.id);
+				if (mid <= cutoff) return { ...m, isSeen: true };
+				return m;
+			});
+			return { ...state, messages: { ...state.messages, [conversationId]: next } };
 		}
 		case 'SET_ACTIVE':
 			return { ...state, activeConversationId: action.payload };
@@ -134,6 +149,7 @@ interface ChatContextValue {
 	sendMessage: (message: Message) => void;
 	unlockMessage: (messageId: string, conversationId: string) => void;
 	markRead: (conversationId: string) => void;
+	markSeenUpTo: (conversationId: string, lastMessageId: string) => void;
 	setActive: (conversationId: string | null) => void;
 	addConversation: (conv: Conversation) => void;
 	/** Merge/replace messages by id (e.g. WebSocket `/getmessages`). */
@@ -163,6 +179,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
 	const markRead = useCallback((conversationId: string) => {
 		dispatch({ type: 'MARK_READ', payload: conversationId });
+	}, []);
+
+	const markSeenUpTo = useCallback((conversationId: string, lastMessageId: string) => {
+		dispatch({ type: 'MARK_SEEN_UP_TO', payload: { conversationId, lastMessageId } });
 	}, []);
 
 	const setActive = useCallback((conversationId: string | null) => {
@@ -198,7 +218,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 	return (
 		<ChatContext.Provider value={{
 			state, sendMessage, unlockMessage, markRead,
-			setActive, addConversation, upsertRoomMessages, addRoomMessage,
+			markSeenUpTo, setActive, addConversation, upsertRoomMessages, addRoomMessage,
 			replaceMessage, updateMessage, getConversationForUser, totalUnread,
 		}}
 		>

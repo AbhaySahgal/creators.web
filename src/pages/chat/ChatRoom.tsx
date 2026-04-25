@@ -34,6 +34,7 @@ export function ChatRoom() {
 		state: chatState,
 		sendMessage,
 		markRead,
+		markSeenUpTo,
 		unlockMessage,
 		upsertRoomMessages,
 		addRoomMessage,
@@ -48,6 +49,7 @@ export function ChatRoom() {
 	const [text, setText] = useState('');
 	const [showTipModal, setShowTipModal] = useState(false);
 	const [realtimeSending, setRealtimeSending] = useState(false);
+	const [otherInRoom, setOtherInRoom] = useState(false);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 	const replyIdxRef = useRef(0);
 	const lastSendRef = useRef<{ at: number, roomId: string, text: string } | null>(null);
@@ -76,7 +78,29 @@ export function ChatRoom() {
 		[showToast]
 	);
 
+	const onPresenceEvent = useCallback(
+		(ev: { type: 'join' | 'leave', user_id?: string }) => {
+			// Track other participant presence for WhatsApp-style delivery ticks.
+			const otherIdxLocal = conv?.participantIds?.indexOf(userId) === 0 ? 1 : 0;
+			const otherIdLocal = conv?.participantIds?.[otherIdxLocal] ?? '';
+			if (otherIdLocal && ev.user_id === otherIdLocal) {
+				setOtherInRoom(ev.type === 'join');
+			}
+			if (ev.type === 'join') showToast('User joined the session');
+			if (ev.type === 'leave') showToast('User left the session');
+		},
+		[showToast, conv, userId]
+	);
+
 	const roomId = convId ?? '';
+
+	const onSeenEvent = useCallback(
+		(payload: { last_message_id: string }) => {
+			// When the other user reports they saw up to X, mark my sent messages as seen up to that id.
+			markSeenUpTo(roomId, payload.last_message_id);
+		},
+		[markSeenUpTo, roomId]
+	);
 	const activeChatBooking =
 		sessionsState.active?.accepted.kind === 'chat' && sessionsState.active.accepted.room_id === roomId ?
 			sessionsState.active.accepted :
@@ -88,13 +112,15 @@ export function ChatRoom() {
 	const isBookedChatRoom = !!activeChatBooking || !!endedChatBooking;
 	const canSendBookedChat = !isBookedChatRoom || !!activeChatBooking;
 
-	const { otherTyping, realtimeActive, notifyTyping, sendRealtime } = useRoomChat({
+	const { otherTyping, realtimeActive, notifyTyping, sendRealtime, sendSeen } = useRoomChat({
 		roomUuid: conv && convId ? convId : undefined,
 		currentUserId: userId,
 		postsWsStatus: contentState.postsWsStatus,
 		getParticipantMeta,
 		upsertRoomMessages,
 		addRoomMessage,
+		onPresenceEvent,
+		onSeenEvent,
 		onProtocolError,
 		sendWithAck: !!activeChatBooking,
 		transport: activeChatBooking ? 'ws' : 'multiplex',
@@ -103,6 +129,26 @@ export function ChatRoom() {
 	useEffect(() => {
 		if (convId) markRead(convId);
 	}, [convId, markRead]);
+
+	const lastSeenSentAtRef = useRef(0);
+	const lastSeenMsgIdRef = useRef<string | null>(null);
+
+	useEffect(() => {
+		// Auto-send seen for the latest message from the other user (throttled).
+		if (!realtimeActive || !convId) return;
+		const otherIdxLocal = conv?.participantIds?.indexOf(userId) === 0 ? 1 : 0;
+		const otherIdLocal = conv?.participantIds?.[otherIdxLocal] ?? '';
+		if (!otherIdLocal) return;
+		const latestFromOther = [...messages].reverse().find(m => m.senderId === otherIdLocal && /^\d+$/.test(m.id));
+		const mid = latestFromOther?.id;
+		if (!mid) return;
+		const now = Date.now();
+		if (lastSeenMsgIdRef.current === mid) return;
+		if (now - lastSeenSentAtRef.current < 1200) return;
+		lastSeenSentAtRef.current = now;
+		lastSeenMsgIdRef.current = mid;
+		sendSeen(mid);
+	}, [realtimeActive, convId, conv, messages, userId, sendSeen]);
 
 	useEffect(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -382,8 +428,10 @@ export function ChatRoom() {
 												msg.sendStatus === 'sending' ?
 													<span className="text-[10px] text-muted/70">Sending…</span> :
 													(msg.isSeen ?
-														<CheckCheck className="w-3 h-3 text-rose-400" /> :
-														<Check className="w-3 h-3 text-muted/70" />)
+														<CheckCheck className="w-3 h-3 text-sky-400" /> :
+														(otherInRoom ?
+															<CheckCheck className="w-3 h-3 text-muted/70" /> :
+															<Check className="w-3 h-3 text-muted/70" />))
 										)}
 									</div>
 								</div>
