@@ -165,7 +165,7 @@ export function ChatRoom() {
 			sessionsState.ended :
 			(sessionsState.endedRooms?.[roomId] ?? null);
 	const timerForRoom =
-		sessionsState.timer?.room_id === roomId ?
+		(sessionsState.timer?.room_id === roomId && (sessionsState.timer.kind ?? 'chat') === 'chat') ?
 			sessionsState.timer :
 			null;
 	// If we have a timer tick for this room, it implies an accepted active booking even if `/state`

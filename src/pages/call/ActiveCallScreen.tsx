@@ -6,6 +6,7 @@ import { useCall } from '../../context/CallContext';
 import { useSession } from '../../context/SessionContext';
 import { useAuth } from '../../context/AuthContext';
 import { useSessions } from '../../context/SessionsContext';
+import { useNotifications } from '../../context/NotificationContext';
 import { buildCallChannel, fetchAgoraRtcToken, getAgoraAppId, stringToAgoraUid } from '../../services/agoraRtc';
 import { formatINR } from '../../services/razorpay';
 
@@ -21,6 +22,7 @@ export function ActiveCallScreen() {
 	const { state: sessionState, endSessionEarly } = useSession();
 	const { state: sessionsState, endSession: endBookedSession } = useSessions();
 	const { state: authState } = useAuth();
+	const { showToast } = useNotifications();
 	const call = callState.activeCall;
 	const session = sessionState.activeSession;
 	const sessionsBooking = sessionsState.active?.accepted?.kind === 'call' ? sessionsState.active : null;
@@ -36,6 +38,8 @@ export function ActiveCallScreen() {
 	const remoteVideoTrackRef = useRef<IRemoteVideoTrack | null>(null);
 	const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
 	const [agoraError, setAgoraError] = useState('');
+	const lastBookedRoomIdRef = useRef<string | null>(null);
+	const notifiedEndRequestIdRef = useRef<string | null>(null);
 
 	const isTimedSession = session && (session.type === 'audio' || session.type === 'video');
 	const secondsRemaining = sessionState.secondsRemaining;
@@ -46,6 +50,22 @@ export function ActiveCallScreen() {
 			navigate(-1);
 		}
 	}, [call, session, sessionsBooking, navigate]);
+
+	useEffect(() => {
+		if (sessionsBooking?.accepted.room_id) {
+			lastBookedRoomIdRef.current = sessionsBooking.accepted.room_id;
+		}
+	}, [sessionsBooking?.accepted.room_id]);
+
+	useEffect(() => {
+		const roomId = lastBookedRoomIdRef.current;
+		if (!roomId) return;
+		const ended = sessionsState.endedRooms[roomId] ?? (sessionsState.ended?.room_id === roomId ? sessionsState.ended : null);
+		if (!ended) return;
+		if (notifiedEndRequestIdRef.current === ended.request_id) return;
+		notifiedEndRequestIdRef.current = ended.request_id;
+		showToast(ended.reason === 'timeout' ? 'Call ended: time is over.' : 'Call ended.');
+	}, [sessionsState.ended, sessionsState.endedRooms, showToast]);
 
 	useEffect(() => {
 		if (!isTimedSession && call?.status === 'active') {
@@ -81,7 +101,9 @@ export function ActiveCallScreen() {
 
 	function handleEndCall() {
 		if (sessionsBooking?.accepted) {
-			void endBookedSession(sessionsBooking.accepted.request_id).catch(() => {});
+			void endBookedSession(sessionsBooking.accepted.request_id).catch(err => {
+				setAgoraError(err instanceof Error ? err.message : 'Failed to end booked call session.');
+			});
 		}
 		if (isTimedSession) {
 			endSessionEarly();
@@ -167,8 +189,13 @@ export function ActiveCallScreen() {
 			}
 		});
 
-		void fetchAgoraRtcToken(channelName, uid, 'host').then(token => (
-			client.join(appId, channelName, bookingAgora?.token ?? token, uid).then(() => (
+		void Promise.resolve().then(() => {
+			const acceptedToken = bookingAgora?.token ?? null;
+			const fallbackTokenPromise = acceptedToken ? Promise.resolve<string | null>(null) : fetchAgoraRtcToken(channelName, uid, 'host');
+			return fallbackTokenPromise.then(fallbackToken => {
+				const resolvedToken = acceptedToken ?? fallbackToken ?? null;
+				return client.join(appId, channelName, resolvedToken, uid);
+			}).then(() => (
 				AgoraRTC.createMicrophoneAudioTrack().then(audioTrack => {
 					localAudioTrackRef.current = audioTrack;
 					const audioOnly = (call?.type ?? callType) !== 'video';
@@ -181,9 +208,9 @@ export function ActiveCallScreen() {
 						return client.publish([audioTrack, videoTrack]);
 					});
 				})
-			))
-		)).catch(() => {
-			setAgoraError('Unable to connect media. Showing call preview.');
+			));
+		}).catch(() => {
+			setAgoraError('Unable to connect media. Accept may have failed to mint Agora credentials on server.');
 		});
 
 		return () => {

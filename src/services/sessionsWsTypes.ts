@@ -54,6 +54,8 @@ export type SessionsAcceptedPayload = {
 	call_session_id: string | null,
 	session: CallSessionSnapshot | null,
 	agora: AgoraRtcCredentials | null,
+	started_at?: string,
+	ends_at?: string,
 };
 
 export type SessionsRejectedPayload = {
@@ -76,6 +78,9 @@ export type SessionsEndSessionResponse =
 			session_id: string,
 			room_id: string,
 		},
+		request_id?: string,
+		room_id?: string,
+		reason?: 'manual' | 'timeout',
 	};
 
 export type SessionsFeedbackResponse = {
@@ -105,6 +110,7 @@ export type SessionsFeedbackReceivedEvent = {
 export type SessionsTimerEvent = {
 	request_id: string,
 	room_id: string,
+	kind?: SessionKind,
 	started_at?: string,
 	ends_at: string,
 	remaining_sec: number,
@@ -113,5 +119,8 @@ export type SessionsTimerEvent = {
 export type SessionsEndedEvent = {
 	request_id: string,
 	room_id: string,
+	kind?: SessionKind,
+	started_at?: string,
+	ends_at?: string,
 	reason?: 'timeout' | 'manual',
 };

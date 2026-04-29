@@ -234,6 +234,18 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 	const didHydrateLocalRef = useRef(false);
 	const hydratedLocalAtMsRef = useRef<number | null>(null);
 
+	const applyEndedState = useCallback((payload: SessionsEndedEvent) => {
+		dispatch({ type: 'ENDED_SET', payload });
+		if (joinedBookedRoomRef.current === payload.room_id) {
+			joinedBookedRoomRef.current = null;
+		}
+		void ws.request('chat', 'leaveroom', [payload.room_id]).catch(() => {});
+		const active = state.active?.accepted;
+		if (active?.room_id === payload.room_id) {
+			dispatch({ type: 'ACTIVE_CLEAR' });
+		}
+	}, [state.active?.accepted, ws]);
+
 	function ensureBookedRoomJoined(roomId: string) {
 		if (!wsConnected) return;
 		if (!roomId) return;
@@ -336,8 +348,21 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 
 	const endSession = useCallback(
 		(requestId: string) =>
-			sessionsEndSession(ws, requestId),
-		[ws]
+			sessionsEndSession(ws, requestId).then(res => {
+				const active = state.active?.accepted;
+				if (active?.request_id !== requestId) return res;
+				const roomId =
+					('room_id' in res && res.room_id) ?
+						res.room_id :
+						('callEnded' in res ? res.callEnded.room_id : active.room_id);
+				const reason =
+					('reason' in res && res.reason === 'timeout') ?
+						'timeout' :
+						'manual';
+				applyEndedState({ request_id: requestId, room_id: roomId, reason, kind: active.kind });
+				return res;
+			}),
+		[ws, state.active?.accepted, applyEndedState]
 	);
 
 	const submitFeedback = useCallback(
@@ -407,21 +432,14 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 		});
 		const offPrompt = ws.on('sessions', 'feedbackprompt', data => {
 			const payload = data as SessionsFeedbackPromptEvent;
-			// Ensure "session ended" UI is visible on both sides even if `sessions|ended`
-			// arrives late or was missed; the feedback prompt implies completion.
+			// Ensure ended UI even if `sessions|ended` arrives late/missed.
 			const active = state.active?.accepted;
 			const roomId =
 				active?.request_id === payload.request_id ?
 					active.room_id :
 					roomIdByRequestIdRef.current[payload.request_id];
 			if (roomId) {
-				dispatch({
-					type: 'ENDED_SET',
-					payload: { request_id: payload.request_id, room_id: roomId, reason: 'manual' },
-				});
-				if (active?.room_id === roomId) {
-					dispatch({ type: 'ACTIVE_CLEAR' });
-				}
+				applyEndedState({ request_id: payload.request_id, room_id: roomId, reason: 'manual', kind: active?.kind });
 			}
 			dispatch({ type: 'FEEDBACK_PROMPT', payload });
 		});
@@ -431,25 +449,16 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 		});
 		const offTimer = ws.on('sessions', 'timer', data => {
 			const payload = data as SessionsTimerEvent;
-			// Timer ticks are a reliable way to learn the active room after reload/reconnect,
-			// even if local `active` wasn't restored yet.
+			// Timer ticks sync session timing; never reactivate rooms already marked ended.
+			if (state.endedRooms[payload.room_id] || state.ended?.room_id === payload.room_id) {
+				return;
+			}
 			dispatch({ type: 'TIMER_UPDATE', payload });
 			ensureBookedRoomJoined(payload.room_id);
 		});
 		const offEnded = ws.on('sessions', 'ended', data => {
 			const payload = data as SessionsEndedEvent;
-			const active = state.active?.accepted;
-			// Always record the ended booking so chat UI can reflect it by `room_id`,
-			// even if the local `active` booking is different or already cleared.
-			dispatch({ type: 'ENDED_SET', payload });
-			// Stop treating this room as joinable/realtime after end.
-			if (joinedBookedRoomRef.current === payload.room_id) {
-				joinedBookedRoomRef.current = null;
-			}
-			void ws.request('chat', 'leaveroom', [payload.room_id]).catch(() => {});
-			if (active?.room_id === payload.room_id) {
-				dispatch({ type: 'ACTIVE_CLEAR' });
-			}
+			applyEndedState(payload);
 		});
 
 		return () => {
@@ -461,7 +470,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 			offTimer();
 			offEnded();
 		};
-	}, [ws, authState.user, state.active?.accepted?.request_id]);
+	}, [ws, authState.user, state.active?.accepted, state.ended?.room_id, state.endedRooms, applyEndedState]);
 
 	// When an accepted chat booking is active, keep the room joined so messages arrive
 	// even if the user is on the Messages list (WhatsApp-like unread behavior).
@@ -516,18 +525,23 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 		}
 	}, [state]);
 
-	// Cross-service: `/endsession` on `sessions` may also emit `|call|ended|{...}`.
+	// Cross-service: `/endsession` on `sessions` also emits `|call|ended|{...}`.
 	useEffect(() => {
 		const offEnded = ws.on('call', 'ended', data => {
-			const payload = data as { session_id?: string };
+			const payload = data as { session_id?: string, room_id?: string };
 			const active = state.active?.accepted;
 			if (active?.kind !== 'call') return;
 			if (!payload?.session_id) return;
 			if (active.call_session_id && active.call_session_id !== payload.session_id) return;
-			dispatch({ type: 'ACTIVE_CLEAR' });
+			applyEndedState({
+				request_id: active.request_id,
+				room_id: payload.room_id ?? active.room_id,
+				reason: 'manual',
+				kind: 'call',
+			});
 		});
 		return offEnded;
-	}, [ws, state.active?.accepted?.kind, state.active?.accepted?.call_session_id]);
+	}, [ws, state.active?.accepted, applyEndedState]);
 
 	// Auto-navigate to chat on accept (but don't force-redirect immediately after local restore).
 	useEffect(() => {

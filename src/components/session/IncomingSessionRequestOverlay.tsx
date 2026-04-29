@@ -9,6 +9,16 @@ function centsToMinorString(cents: string): string {
 	return /^\d+$/.test(trimmed) ? trimmed : '0';
 }
 
+function toAcceptErrorMessage(error: unknown): string {
+	if (!(error instanceof Error)) return 'Failed to accept session request';
+	const raw = error.message || '';
+	const lower = raw.toLowerCase();
+	if (lower.includes('agora') || lower.includes('token') || lower.includes('rtc')) {
+		return 'Accept failed: media token not issued by server. Ask backend to verify Agora configuration.';
+	}
+	return raw;
+}
+
 export function IncomingSessionRequestOverlay() {
 	const { state, acceptSession, rejectSession } = useSessions();
 	const { showToast } = useNotifications();
@@ -29,7 +39,7 @@ export function IncomingSessionRequestOverlay() {
 				showToast('Accepted session request');
 			})
 			.catch(e => {
-				showToast(e instanceof Error ? e.message : 'Failed to accept', 'error');
+				showToast(toAcceptErrorMessage(e), 'error');
 			})
 			.finally(() => {
 				setBusy(false);
