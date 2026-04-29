@@ -9,6 +9,7 @@ import { useSessions } from '../../context/SessionsContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { buildCallChannel, fetchAgoraRtcToken, getAgoraAppId, stringToAgoraUid } from '../../services/agoraRtc';
 import { formatINR } from '../../services/razorpay';
+import { SessionFeedbackModal } from '../../components/session/SessionFeedbackModal';
 
 function formatDuration(secs: number): string {
 	const m = Math.floor(secs / 60).toString().padStart(2, '0');
@@ -131,9 +132,19 @@ export function ActiveCallScreen() {
 	const isCameraOff = call?.isCameraOff ?? false;
 	const isSpeakerOn = call?.isSpeakerOn ?? true;
 
+	const bookedTimer =
+		sessionsBooking?.accepted.request_id && sessionsState.timer?.request_id === sessionsBooking.accepted.request_id ?
+			sessionsState.timer :
+			null;
+	const bookedSecondsRemaining = bookedTimer?.kind === 'call' ? bookedTimer.remaining_sec : null;
+	const isBookedWarning =
+		typeof bookedSecondsRemaining === 'number' &&
+		bookedSecondsRemaining <= 60 &&
+		bookedSecondsRemaining > 0;
+
 	const timerDisplay = isTimedSession ?
 		formatDuration(secondsRemaining) :
-		formatDuration(elapsed);
+		(bookedSecondsRemaining !== null ? formatDuration(Math.max(0, Math.floor(bookedSecondsRemaining))) : formatDuration(elapsed));
 	const hideControls = !showControls && isVideo;
 
 	useEffect(() => {
@@ -154,6 +165,11 @@ export function ActiveCallScreen() {
 		const appId = bookingAgora?.app_id ?? getAgoraAppId();
 		const client = AgoraRTC.createClient({ codec: 'vp8', mode: 'rtc' });
 		setAgoraError('');
+
+		if (!appId) {
+			setAgoraError('Agora is not configured (missing VITE_AGORA_APP_ID).');
+			return () => {};
+		}
 
 		if (bookingAgora?.dummy) {
 			setAgoraError('Call is in dummy mode (Agora not configured).');
@@ -194,6 +210,9 @@ export function ActiveCallScreen() {
 			const fallbackTokenPromise = acceptedToken ? Promise.resolve<string | null>(null) : fetchAgoraRtcToken(channelName, uid, 'host');
 			return fallbackTokenPromise.then(fallbackToken => {
 				const resolvedToken = acceptedToken ?? fallbackToken ?? null;
+				if (!resolvedToken) {
+					throw new Error('Missing Agora token. Backend must include `agora.token` in `sessions|accepted` (or configure VITE_AGORA_TOKEN_ENDPOINT).');
+				}
 				return client.join(appId, channelName, resolvedToken, uid);
 			}).then(() => (
 				AgoraRTC.createMicrophoneAudioTrack().then(audioTrack => {
@@ -209,8 +228,10 @@ export function ActiveCallScreen() {
 					});
 				})
 			));
-		}).catch(() => {
-			setAgoraError('Unable to connect media. Accept may have failed to mint Agora credentials on server.');
+		}).catch(err => {
+			const msg = err instanceof Error ? err.message : '';
+			if (msg) setAgoraError(msg);
+			else setAgoraError('Unable to connect media. Accept may have failed to mint Agora credentials on server.');
 		});
 
 		return () => {
@@ -295,17 +316,17 @@ export function ActiveCallScreen() {
 						</p>
 					) : (
 						<div className="flex items-center justify-center gap-2 mt-1">
-							{isTimedSession && (
+							{(isTimedSession || bookedSecondsRemaining !== null) && (
 								<div className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold ${
-									isWarning ? 'bg-rose-500/30 text-rose-300 animate-pulse' : 'bg-background/70 text-foreground/80 dark:bg-white/10 dark:text-white/70'
+									(isWarning || isBookedWarning) ? 'bg-rose-500/30 text-rose-300 animate-pulse' : 'bg-background/70 text-foreground/80 dark:bg-white/10 dark:text-white/70'
 								}`}
 								>
-									{isWarning && <AlertTriangle className="w-3 h-3" />}
+									{(isWarning || isBookedWarning) && <AlertTriangle className="w-3 h-3" />}
 									<Clock className="w-3 h-3" />
 									{timerDisplay} left
 								</div>
 							)}
-							{!isTimedSession && (
+							{!isTimedSession && bookedSecondsRemaining === null && (
 								<p className="text-muted dark:text-white/60 text-sm tabular-nums">{timerDisplay}</p>
 							)}
 						</div>
@@ -318,7 +339,7 @@ export function ActiveCallScreen() {
 					)}
 				</div>
 
-				{isWarning && (
+				{(isWarning || isBookedWarning) && (
 					<div className={`mx-6 bg-rose-500/20 border border-rose-500/30 rounded-2xl px-4 py-3 flex items-center gap-2 transition-opacity duration-300 ${hideControls ? 'opacity-0' : 'opacity-100'}`}>
 						<AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
 						<p className="text-sm text-rose-300 font-medium">1 minute remaining in your session</p>
@@ -371,6 +392,7 @@ export function ActiveCallScreen() {
 					</div>
 				</div>
 			</div>
+			<SessionFeedbackModal />
 		</div>
 	);
 }
