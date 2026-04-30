@@ -10,7 +10,6 @@ import { useContent } from '../../context/ContentContext';
 import { mockCreators } from '../../data/users';
 import { useNotifications } from '../../context/NotificationContext';
 import { useChat } from '../../context/ChatContext';
-import { useCall } from '../../context/CallContext';
 import { useSession } from '../../context/SessionContext';
 import { SessionPickerModal, type SessionPayMode } from '../../components/modals/SessionPickerModal';
 import type { Creator, SessionType } from '../../types';
@@ -27,12 +26,12 @@ export function CreatorProfile() {
 	const { state: contentState, isSubscribed, loadCreatorPosts, creatorWsGetByUserId } = useContent();
 	const { showToast } = useNotifications();
 	const { addConversation, getConversationForUser } = useChat();
-	const { startCall } = useCall();
 	useSession();
 	const { requestSession, state: sessionsState, clearOutgoing } = useSessions();
 	const [showTipModal, setShowTipModal] = useState(false);
 	const [showSubscribeModal, setShowSubscribeModal] = useState(false);
 	const [showSessionModal, setShowSessionModal] = useState(false);
+	const [sessionDefaultType, setSessionDefaultType] = useState<SessionType | undefined>(undefined);
 	const [postFilter, setPostFilter] = useState<'all' | 'free' | 'locked'>('all');
 	const [remoteCreator, setRemoteCreator] = useState<Creator | null>(null);
 	const [isLoadingCreator, setIsLoadingCreator] = useState(false);
@@ -265,13 +264,13 @@ export function CreatorProfile() {
 								{subscribed ? (
 									<>
 										<button
-											onClick={() => { startCall(creatorForDisplay.id, creatorForDisplay.name, creatorForDisplay.avatar, 'audio'); navigate('/call'); }}
+											onClick={() => { setSessionDefaultType('audio'); setShowSessionModal(true); }}
 											className="w-9 h-9 bg-foreground/10 hover:bg-emerald-500/20 hover:text-emerald-400 text-muted rounded-xl flex items-center justify-center transition-all"
 										>
 											<Phone className="w-4 h-4" />
 										</button>
 										<button
-											onClick={() => { startCall(creatorForDisplay.id, creatorForDisplay.name, creatorForDisplay.avatar, 'video'); navigate('/call'); }}
+											onClick={() => { setSessionDefaultType('video'); setShowSessionModal(true); }}
 											className="w-9 h-9 bg-foreground/10 hover:bg-sky-500/20 hover:text-sky-400 text-muted rounded-xl flex items-center justify-center transition-all"
 										>
 											<Video className="w-4 h-4" />
@@ -302,7 +301,7 @@ export function CreatorProfile() {
 
 								{/* Booking sessions is not subscription-gated (v3 sessions spec). */}
 								<button
-									onClick={() => setShowSessionModal(true)}
+									onClick={() => { setSessionDefaultType(undefined); setShowSessionModal(true); }}
 									className="flex items-center gap-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 text-sm font-semibold px-3 py-2 rounded-xl transition-all border border-rose-500/20"
 								>
 									Book Session
@@ -410,13 +409,14 @@ export function CreatorProfile() {
 			/>
 			<SessionPickerModal
 				isOpen={showSessionModal}
-				onClose={() => setShowSessionModal(false)}
+				onClose={() => { setShowSessionModal(false); setSessionDefaultType(undefined); }}
 				creatorName={creatorForDisplay.name}
 				creatorAvatar={creatorForDisplay.avatar}
 				ratePerMinute={creatorForDisplay.perMinuteRate}
 				walletBalanceMinor={authState.user?.walletBalanceMinor ?? '0'}
 				onConfirm={handleStartSession}
 				protocol="sessions"
+				defaultType={sessionDefaultType}
 			/>
 		</Layout>
 	);

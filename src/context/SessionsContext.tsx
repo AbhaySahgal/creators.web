@@ -63,6 +63,27 @@ type EndedRoomsMap = Record<string, SessionsEndedEvent>;
 
 const ENDED_ROOMS_STORAGE_KEY = 'cw.sessions.endedRooms.v1';
 const LOCAL_SESSIONS_STORAGE_KEY = 'cw.sessions.snapshot.v1';
+const UI_CALLTYPE_STORAGE_KEY = 'cw.sessions.uiCallTypeByRequestId.v1';
+
+function loadUiCallTypeMap(): Record<string, SessionsUiCallType> {
+	try {
+		const raw = globalThis.localStorage?.getItem(UI_CALLTYPE_STORAGE_KEY);
+		if (!raw) return {};
+		const parsed = JSON.parse(raw) as unknown;
+		if (!parsed || typeof parsed !== 'object') return {};
+		return parsed as Record<string, SessionsUiCallType>;
+	} catch {
+		return {};
+	}
+}
+
+function persistUiCallTypeMap(map: Record<string, SessionsUiCallType>) {
+	try {
+		globalThis.localStorage?.setItem(UI_CALLTYPE_STORAGE_KEY, JSON.stringify(map));
+	} catch {
+		// ignore
+	}
+}
 
 function loadEndedRooms(): EndedRoomsMap {
 	try {
@@ -239,11 +260,12 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 	const { addConversation, addRoomMessage } = useChat();
 	const { showToast } = useNotifications();
 	const [state, dispatch] = useReducer(sessionsReducer, initialState);
-	const uiCallTypeByRequestIdRef = useRef<Record<string, SessionsUiCallType>>({});
+	const uiCallTypeByRequestIdRef = useRef<Record<string, SessionsUiCallType>>(loadUiCallTypeMap());
 	const minutesByRequestIdRef = useRef<Record<string, number>>({});
 	const creatorMetaByRequestIdRef = useRef<Record<string, { userId: string, name: string, avatar: string }>>({});
 	const fanMetaByRequestIdRef = useRef<Record<string, { userId: string, name: string }>>({});
 	const roomIdByRequestIdRef = useRef<Record<string, string>>({});
+	const agoraByRequestIdRef = useRef<Record<string, SessionsAcceptedPayload['agora']>>({});
 	const joinedBookedRoomRef = useRef<string | null>(null);
 	const didPromptActiveRequestIdRef = useRef<string | null>(null);
 	const didHydrateLocalRef = useRef(false);
@@ -315,6 +337,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 					minutesByRequestIdRef.current[res.request_id] = opts.minutes;
 					if (opts.kind === 'call' && opts.uiCallType) {
 						uiCallTypeByRequestIdRef.current[res.request_id] = opts.uiCallType;
+						persistUiCallTypeMap(uiCallTypeByRequestIdRef.current);
 					}
 					if (opts.creatorDisplay) {
 						creatorMetaByRequestIdRef.current[res.request_id] = {
@@ -349,7 +372,11 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 					type: 'ACTIVE_SET',
 					payload: {
 						accepted: res,
-						uiCallType: uiCallTypeByRequestIdRef.current[res.request_id],
+						// `/state` doesn't carry audio vs video. Default call bookings to video unless we have a local hint.
+						uiCallType:
+							res.kind === 'call' ?
+								(uiCallTypeByRequestIdRef.current[res.request_id] ?? 'video') :
+								undefined,
 						otherDisplay: fan ? { name: fan.name, avatar: '' } : undefined,
 					},
 				});
@@ -444,13 +471,18 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 	}, [authState.user, showToast]);
 
 	const bookingRowToAccepted = (row: SessionsBookingRow): SessionsAcceptedPayload => {
+		const preservedAgora =
+			(state.active?.accepted?.request_id === row.id && state.active.accepted.agora) ?
+				state.active.accepted.agora :
+				agoraByRequestIdRef.current[row.id] ??
+				null;
 		return {
 			request_id: row.id,
 			room_id: row.room_id ?? '',
 			kind: row.kind,
 			call_session_id: row.call_session_id,
 			session: null,
-			agora: null,
+			agora: preservedAgora,
 			started_at: row.started_at,
 			ends_at: row.ends_at,
 			duration_minutes: row.duration_minutes,
@@ -507,11 +539,19 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 					}));
 
 				const activeAccepted = activeRows.find(r => r.status === 'accepted' && !!r.room_id) ?? null;
+				const preservedUiCallType =
+					activeAccepted && state.active?.accepted?.request_id === activeAccepted.id ?
+						state.active.uiCallType :
+						undefined;
 				const nextActive: ActiveBookingState | null = activeAccepted ?
 					{
 						accepted: bookingRowToAccepted(activeAccepted),
 						minutes: activeAccepted.duration_minutes,
-						uiCallType: uiCallTypeByRequestIdRef.current[activeAccepted.id],
+						// `/state` does not include audio vs video. Preserve locally remembered UI hint.
+						uiCallType:
+							activeAccepted.kind === 'call' ?
+								(preservedUiCallType ?? uiCallTypeByRequestIdRef.current[activeAccepted.id] ?? 'video') :
+								undefined,
 					} :
 					null;
 
@@ -614,6 +654,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 		const offAccepted = ws.on('sessions', 'accepted', data => {
 			const payload = data as SessionsAcceptedPayload;
 			roomIdByRequestIdRef.current[payload.request_id] = payload.room_id;
+			agoraByRequestIdRef.current[payload.request_id] = payload.agora ?? null;
 			const me = authState.user;
 			const creatorMeta = creatorMetaByRequestIdRef.current[payload.request_id];
 			const fanMeta = fanMetaByRequestIdRef.current[payload.request_id];
@@ -627,7 +668,10 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 				payload: {
 					accepted: payload,
 					minutes: minutesByRequestIdRef.current[payload.request_id],
-					uiCallType: uiCallTypeByRequestIdRef.current[payload.request_id],
+					uiCallType:
+						payload.kind === 'call' ?
+							(uiCallTypeByRequestIdRef.current[payload.request_id] ?? 'video') :
+							undefined,
 					otherDisplay,
 				},
 			});

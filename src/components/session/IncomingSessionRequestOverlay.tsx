@@ -26,6 +26,10 @@ export function IncomingSessionRequestOverlay() {
 
 	const incoming = state.incoming[0]?.request;
 	const priceMinor = useMemo(() => centsToMinorString(incoming?.price_cents ?? '0'), [incoming?.price_cents]);
+	const minutesLabel =
+		typeof incoming?.minutes === 'number' && Number.isFinite(incoming.minutes) && incoming.minutes > 0 ?
+			`${Math.floor(incoming.minutes)} min` :
+			null;
 
 	if (!incoming) return null;
 
@@ -83,7 +87,7 @@ export function IncomingSessionRequestOverlay() {
 					</p>
 					<h2 className="text-2xl font-bold text-foreground dark:text-white mb-1">{incoming.fan_display}</h2>
 					<p className="text-muted/80 dark:text-white/40 text-sm">
-						Price: {formatINRFromMinor(priceMinor)}
+						Price: {formatINRFromMinor(priceMinor)}{minutesLabel ? ` · ${minutesLabel}` : ''}
 					</p>
 
 					<div className="flex items-center justify-center gap-10 mt-10">

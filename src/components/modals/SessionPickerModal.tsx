@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, MessageCircle, Phone, Video, Clock, Zap, AlertCircle, Wallet } from '../icons';
 import { formatINR } from '../../services/razorpay';
 import { compareMinor, formatINRFromMinor, inrRupeesToMinor } from '../../utils/money';
@@ -21,6 +21,9 @@ interface Props {
 	onConfirm: (type: SessionType, durationMinutes: number, totalCost: number, payMode: SessionPayMode) => void;
 	/** When set to `sessions`, the UI will only collect the session type and defer pricing/payment to the backend sessions service. */
 	protocol?: SessionPickerProtocol;
+	/** Optional defaults for convenience (e.g. "tap phone icon" should preselect audio). */
+	defaultType?: SessionType;
+	defaultDurationMinutes?: number;
 }
 
 const SESSION_TYPES: { type: SessionType, label: string, icon: React.ElementType, color: string, bg: string }[] = [
@@ -38,10 +41,25 @@ export function SessionPickerModal({
 	walletBalanceMinor,
 	onConfirm,
 	protocol = 'local',
+	defaultType,
+	defaultDurationMinutes,
 }: Props) {
 	const [selectedType, setSelectedType] = useState<SessionType | null>(null);
 	const [selectedDuration, setSelectedDuration] = useState<number | null>(null);
 	const [payMode, setPayMode] = useState<SessionPayMode>('external');
+
+	useEffect(() => {
+		if (!isOpen) return;
+		// Apply defaults each time the modal opens.
+		setSelectedType(defaultType ?? null);
+		setSelectedDuration(
+			typeof defaultDurationMinutes === 'number' && DURATION_OPTIONS.includes(defaultDurationMinutes) ?
+				defaultDurationMinutes :
+				null
+		);
+		// For sessions-protocol, payment is always server-side wallet logic.
+		if (protocol === 'sessions') setPayMode('wallet');
+	}, [isOpen, defaultType, defaultDurationMinutes, protocol]);
 
 	if (!isOpen) return null;
 

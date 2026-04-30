@@ -46,13 +46,43 @@ function assertRating(rating: number): number {
 
 export function sessionsRequest(
 	ws: WsClient,
-	opts: { creatorUserId: string, kind: SessionKind, minutes: number, requestId?: string }
+	opts: { creatorUserId: string, kind: SessionKind, minutes?: number, requestId?: string }
 ): Promise<SessionsRequestResponse> {
 	const creatorUserId = assertDigitsOnly('creatorUserId', opts.creatorUserId);
 	const kind = assertKind(opts.kind);
-	const minutes = assertMinutes(opts.minutes);
 	const rid = assertRequestIdTag(opts.requestId);
-	return ws.request('sessions', 'request', [creatorUserId, kind, String(minutes)], rid).then(r => r as SessionsRequestResponse);
+
+	// Backends have existed in both forms:
+	// - `/request <creatorUserId> <call|chat> <minutes>`
+	// - `/request <creatorUserId> <call|chat>` (minutes implied server-side)
+	//
+	// To stay compatible, try the 3-arg form when minutes is provided, and fall back to 2-arg
+	// if the server rejects the extra argument.
+	const minutes =
+		typeof opts.minutes === 'number' ?
+			assertMinutes(opts.minutes) :
+			undefined;
+
+	const tryWithMinutes = () =>
+		ws.request('sessions', 'request', [creatorUserId, kind, String(minutes)], rid).then(r => r as SessionsRequestResponse);
+
+	const tryWithoutMinutes = () =>
+		ws.request('sessions', 'request', [creatorUserId, kind], rid).then(r => r as SessionsRequestResponse);
+
+	if (minutes === undefined) return tryWithoutMinutes();
+
+	return tryWithMinutes().catch(err => {
+		const msg = err instanceof Error ? err.message : String(err);
+		const lower = msg.toLowerCase();
+		const looksLikeArgCount =
+			lower.includes('usage') ||
+			lower.includes('syntax') ||
+			lower.includes('argument') ||
+			lower.includes('args') ||
+			lower.includes('too many');
+		if (!looksLikeArgCount) throw err;
+		return tryWithoutMinutes();
+	});
 }
 
 export function sessionsState(ws: WsClient, requestIdTag?: string): Promise<SessionsStateResponse> {

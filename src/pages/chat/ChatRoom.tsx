@@ -6,7 +6,6 @@ import { useChat } from '../../context/ChatContext';
 import { useContent } from '../../context/ContentContext';
 import { useWallet } from '../../context/WalletContext';
 import { useNotifications } from '../../context/NotificationContext';
-import { useCall } from '../../context/CallContext';
 import { useSessions } from '../../context/SessionsContext';
 import { Avatar } from '../../components/ui/Avatar';
 import { TipModal } from '../../components/modals/TipModal';
@@ -18,6 +17,8 @@ import { useRoomChat } from '../../hooks/useRoomChat';
 import { formatINR } from '../../services/razorpay';
 import { SessionFeedbackModal } from '../../components/session/SessionFeedbackModal';
 import { isUuid } from '../../utils/isUuid';
+import { SessionPickerModal, type SessionPayMode } from '../../components/modals/SessionPickerModal';
+import type { SessionType } from '../../types';
 
 function formatRemaining(sec: number): string {
 	if (!Number.isFinite(sec)) return '—';
@@ -92,10 +93,11 @@ export function ChatRoom() {
 	const { state: contentState } = useContent();
 	const { deductFunds } = useWallet();
 	const { showToast } = useNotifications();
-	const { startCall } = useCall();
-	const { state: sessionsState, completeSession: completeBookedSession } = useSessions();
+	const { state: sessionsState, completeSession: completeBookedSession, requestSession } = useSessions();
 	const [text, setText] = useState('');
 	const [showTipModal, setShowTipModal] = useState(false);
+	const [showCallBookingModal, setShowCallBookingModal] = useState(false);
+	const [callDefaultType, setCallDefaultType] = useState<SessionType | undefined>(undefined);
 	const [realtimeSending, setRealtimeSending] = useState(false);
 	const [otherInRoom, setOtherInRoom] = useState(false);
 	const [nowMs, setNowMs] = useState(() => Date.now());
@@ -440,22 +442,26 @@ export function ChatRoom() {
 								End session
 							</button>
 						)}
-						<button
-							type="button"
-							onClick={() => { if (!otherId) return; startCall(otherId, otherName, otherAvatar, 'audio'); void navigate('/call'); }}
-							disabled={!otherId}
-							className="w-8 h-8 rounded-xl bg-foreground/10 hover:bg-emerald-500/20 hover:text-emerald-400 text-muted flex items-center justify-center transition-all"
-						>
-							<Phone className="w-4 h-4" />
-						</button>
-						<button
-							type="button"
-							onClick={() => { if (!otherId) return; startCall(otherId, otherName, otherAvatar, 'video'); void navigate('/call'); }}
-							disabled={!otherId}
-							className="w-8 h-8 rounded-xl bg-foreground/10 hover:bg-sky-500/20 hover:text-sky-400 text-muted flex items-center justify-center transition-all"
-						>
-							<Video className="w-4 h-4" />
-						</button>
+						{authState.user?.role === 'fan' ? (
+							<>
+								<button
+									type="button"
+									onClick={() => { if (!otherId) return; setCallDefaultType('audio'); setShowCallBookingModal(true); }}
+									disabled={!otherId}
+									className="w-8 h-8 rounded-xl bg-foreground/10 hover:bg-emerald-500/20 hover:text-emerald-400 text-muted flex items-center justify-center transition-all"
+								>
+									<Phone className="w-4 h-4" />
+								</button>
+								<button
+									type="button"
+									onClick={() => { if (!otherId) return; setCallDefaultType('video'); setShowCallBookingModal(true); }}
+									disabled={!otherId}
+									className="w-8 h-8 rounded-xl bg-foreground/10 hover:bg-sky-500/20 hover:text-sky-400 text-muted flex items-center justify-center transition-all"
+								>
+									<Video className="w-4 h-4" />
+								</button>
+							</>
+						) : null}
 						{authState.user?.role === 'fan' ? (
 							<button
 								onClick={() => setShowTipModal(true)}
@@ -583,6 +589,32 @@ export function ChatRoom() {
 				creatorId={otherId}
 				creatorName={otherName}
 				creatorAvatar={otherAvatar}
+			/>
+			<SessionPickerModal
+				isOpen={showCallBookingModal}
+				onClose={() => { setShowCallBookingModal(false); setCallDefaultType(undefined); }}
+				creatorName={otherName}
+				creatorAvatar={otherAvatar}
+				ratePerMinute={0}
+				walletBalanceMinor={authState.user?.walletBalanceMinor ?? '0'}
+				onConfirm={(type: SessionType, durationMinutes: number, _totalCost: number, _payMode: SessionPayMode) => {
+					if (!otherId) return;
+					const kind = type === 'chat' ? 'chat' : 'call';
+					const uiCallType = type === 'audio' ? 'audio' : type === 'video' ? 'video' : undefined;
+					void requestSession({
+						creatorUserId: otherId,
+						kind,
+						minutes: durationMinutes,
+						uiCallType,
+						creatorDisplay: { name: otherName, avatar: otherAvatar },
+					}).then(() => {
+						showToast('Session request sent. Waiting for creator…');
+					}).catch(err => {
+						showToast(err instanceof Error ? err.message : 'Failed to request session', 'error');
+					});
+				}}
+				protocol="sessions"
+				defaultType={callDefaultType}
 			/>
 			<SessionFeedbackModal />
 		</div>

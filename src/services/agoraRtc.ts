@@ -38,7 +38,10 @@ export function fetchAgoraRtcToken(
 			uid,
 			role,
 		}),
-		credentials: 'include',
+		// Important: do not send cookies from the browser. This keeps CORS simple
+		// (e.g. allows `Access-Control-Allow-Origin: *`) and matches the backend
+		// token endpoint's expected auth model for local dev.
+		credentials: 'omit',
 	}).then(response => {
 		if (!response.ok) return null;
 		return response.json() as Promise<AgoraTokenResponse>;
