@@ -3,6 +3,7 @@ import { X, MessageCircle, Phone, Video, Clock, Zap, AlertCircle, Wallet } from 
 import { formatINR } from '../../services/razorpay';
 import { compareMinor, formatINRFromMinor, inrRupeesToMinor } from '../../utils/money';
 import type { SessionType } from '../../types';
+import { preflightMediaPermissions } from '../../services/mediaPermissions';
 
 // Backend spec allowed values: 10, 15, 20, 25, 30
 const DURATION_OPTIONS = [10, 15, 20, 25, 30];
@@ -73,6 +74,21 @@ export function SessionPickerModal({
 
 	function handleConfirm() {
 		if (!selectedType) return;
+		// Ask for mic/camera permission on the user gesture (this click),
+		// not later during async Agora join (which browsers may block).
+		if (protocol === 'sessions' && selectedType !== 'chat') {
+			void preflightMediaPermissions({ audio: true, video: selectedType === 'video' })
+				.then(() => {
+					if (!selectedDuration) return;
+					onConfirm(selectedType, selectedDuration, 0, 'wallet');
+					onClose();
+				})
+				.catch((e: unknown) => {
+					const msg = e instanceof Error ? e.message : String(e);
+					globalThis.alert?.(msg || 'Please allow microphone access to request a call.');
+				});
+			return;
+		}
 		if (protocol === 'sessions') {
 			if (!selectedDuration) return;
 			onConfirm(selectedType, selectedDuration, 0, 'wallet');
@@ -125,7 +141,7 @@ export function SessionPickerModal({
 					{protocol === 'sessions' && (
 						<div className="bg-foreground/5 rounded-2xl p-4">
 							<p className="text-xs text-muted">
-								Pricing and wallet checks are handled by the server. You must have enough wallet balance to request a session, and the wallet is charged only if the creator accepts.
+								You must have enough wallet balance to request a session, and the wallet is charged only if the creator accepts.
 							</p>
 						</div>
 					)}

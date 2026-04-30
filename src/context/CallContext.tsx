@@ -4,6 +4,7 @@ import type { ActiveCall, CallRecord, CallType } from '../types';
 interface CallState {
 	activeCall: ActiveCall | null;
 	incomingCall: ActiveCall | null;
+	callWaiting: ActiveCall | null;
 	callHistory: CallRecord[];
 }
 
@@ -11,9 +12,12 @@ type CallAction =
 	| { type: 'START_OUTGOING', payload: Omit<ActiveCall, 'isMuted' | 'isCameraOff' | 'isSpeakerOn'> } |
 	{ type: 'INCOMING', payload: Omit<ActiveCall, 'isMuted' | 'isCameraOff' | 'isSpeakerOn'> } |
 	{ type: 'ACCEPT' } |
+	{ type: 'WAITING_ACCEPT' } |
 	{ type: 'CONNECT' } |
 	{ type: 'DECLINE' } |
+	{ type: 'WAITING_DECLINE' } |
 	{ type: 'END' } |
+	{ type: 'END_AND_ACCEPT_WAITING' } |
 	{ type: 'TOGGLE_MUTE' } |
 	{ type: 'TOGGLE_CAMERA' } |
 	{ type: 'TOGGLE_SPEAKER' } |
@@ -83,6 +87,7 @@ const MOCK_HISTORY: CallRecord[] = [
 const initialState: CallState = {
 	activeCall: null,
 	incomingCall: null,
+	callWaiting: null,
 	callHistory: MOCK_HISTORY,
 };
 
@@ -95,7 +100,10 @@ function callReducer(state: CallState, action: CallAction): CallState {
 				incomingCall: null,
 			};
 		case 'INCOMING':
-			if (state.activeCall) return state;
+			if (state.activeCall) {
+				// Call waiting: keep current call active, surface the new call separately.
+				return { ...state, callWaiting: { ...action.payload, isMuted: false, isCameraOff: false, isSpeakerOn: false } };
+			}
 			return {
 				...state,
 				incomingCall: { ...action.payload, isMuted: false, isCameraOff: false, isSpeakerOn: false },
@@ -106,14 +114,33 @@ function callReducer(state: CallState, action: CallAction): CallState {
 				...state,
 				activeCall: { ...state.incomingCall, status: 'connecting' },
 				incomingCall: null,
+				callWaiting: null,
+			};
+		case 'WAITING_ACCEPT':
+			if (!state.callWaiting) return state;
+			return {
+				...state,
+				activeCall: { ...state.callWaiting, status: 'connecting' },
+				callWaiting: null,
+				incomingCall: null,
 			};
 		case 'CONNECT':
 			if (!state.activeCall) return state;
 			return { ...state, activeCall: { ...state.activeCall, status: 'active' } };
 		case 'DECLINE':
 			return { ...state, incomingCall: null };
+		case 'WAITING_DECLINE':
+			return { ...state, callWaiting: null };
 		case 'END':
-			return { ...state, activeCall: null, incomingCall: null };
+			return { ...state, activeCall: null, incomingCall: null, callWaiting: null };
+		case 'END_AND_ACCEPT_WAITING':
+			if (!state.callWaiting) return { ...state, activeCall: null, incomingCall: null, callWaiting: null };
+			return {
+				...state,
+				activeCall: { ...state.callWaiting, status: 'connecting' },
+				incomingCall: null,
+				callWaiting: null,
+			};
 		case 'TOGGLE_MUTE':
 			if (!state.activeCall) return state;
 			return { ...state, activeCall: { ...state.activeCall, isMuted: !state.activeCall.isMuted } };
@@ -134,7 +161,10 @@ interface CallContextValue {
 	state: CallState;
 	startCall: (participantId: string, participantName: string, participantAvatar: string, type: CallType) => void;
 	acceptCall: () => void;
+	acceptWaitingCall: () => void;
 	declineCall: () => void;
+	declineWaitingCall: () => void;
+	endAndAcceptWaitingCall: () => void;
 	endCall: () => void;
 	toggleMute: () => void;
 	toggleCamera: () => void;
@@ -199,10 +229,30 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 		}, 1500);
 	}, []);
 
+	const acceptWaitingCall = useCallback(() => {
+		dispatch({ type: 'WAITING_ACCEPT' });
+		connectTimerRef.current = setTimeout(() => {
+			dispatch({ type: 'CONNECT' });
+		}, 1500);
+	}, []);
+
 	const declineCall = useCallback(() => {
 		if (state.incomingCall) addHistory(state.incomingCall, 'declined');
 		dispatch({ type: 'DECLINE' });
 	}, [state.incomingCall]);
+
+	const declineWaitingCall = useCallback(() => {
+		if (state.callWaiting) addHistory(state.callWaiting, 'declined');
+		dispatch({ type: 'WAITING_DECLINE' });
+	}, [state.callWaiting]);
+
+	const endAndAcceptWaitingCall = useCallback(() => {
+		if (state.activeCall) addHistory(state.activeCall, 'ended');
+		dispatch({ type: 'END_AND_ACCEPT_WAITING' });
+		connectTimerRef.current = setTimeout(() => {
+			dispatch({ type: 'CONNECT' });
+		}, 1500);
+	}, [state.activeCall]);
 
 	const endCall = useCallback(() => {
 		if (state.activeCall) addHistory(state.activeCall, 'ended');
@@ -223,7 +273,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
 	return (
 		<CallContext.Provider value={{
-			state, startCall, acceptCall, declineCall, endCall,
+			state,
+			startCall,
+			acceptCall,
+			acceptWaitingCall,
+			declineCall,
+			declineWaitingCall,
+			endAndAcceptWaitingCall,
+			endCall,
 			toggleMute, toggleCamera, toggleSpeaker,
 		}}
 		>

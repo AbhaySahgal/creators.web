@@ -78,3 +78,42 @@ export function chatTyping(client: CreatorsMultiplexWs, roomUuid: string, active
 	const cmd = active ? `/typing ${id}` : `/typing ${id} 0`;
 	client.sendChatFireAndForget(cmd);
 }
+
+function assertNonEmpty(name: string, value: string): string {
+	const v = (value ?? '').trim();
+	if (!v) throw new Error(`${name} is required`);
+	return v;
+}
+
+export type ChatSeenAckResponse = {
+	ok: true,
+	room_id: string,
+};
+
+/**
+ * Mark the latest message as seen (read receipt).
+ * WS: `/seen <room_id> <lastMessageId>`
+ */
+export function chatSeen(
+	client: CreatorsMultiplexWs,
+	roomUuid: string,
+	lastMessageId: string
+): Promise<ChatSeenAckResponse> {
+	const id = assertUuid(roomUuid);
+	const mid = assertNonEmpty('lastMessageId', lastMessageId);
+	return client.send('chat', `/seen ${id} ${mid}`).then(json => json as ChatSeenAckResponse);
+}
+
+export type ChatSeenStateResponse = {
+	room_id: string,
+	seen: Record<string, string>,
+};
+
+/**
+ * Fetch the last seen pointers for users in the room.
+ * WS: `/seenstate <room_id>`
+ */
+export function chatSeenState(client: CreatorsMultiplexWs, roomUuid: string): Promise<ChatSeenStateResponse> {
+	const id = assertUuid(roomUuid);
+	return client.send('chat', `/seenstate ${id}`).then(json => json as ChatSeenStateResponse);
+}

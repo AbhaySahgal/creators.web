@@ -453,20 +453,12 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 		if (didHydrateLocalRef.current) return;
 		didHydrateLocalRef.current = true;
 
-		const snap = loadLocalSessionsSnapshot();
-		if (!snap) return;
-		hydratedLocalAtMsRef.current = Date.now();
-		dispatch({ type: 'HYDRATE_LOCAL', payload: snap });
-
-		// Notify user on reopen if there is a live chat session or a pending request.
-		const me = authState.user;
-		if (!me) return;
-		if (snap.active?.accepted?.kind === 'chat' && snap.active.accepted.room_id && !snap.endedRooms?.[snap.active.accepted.room_id]) {
-			showToast('Chat session is still active. Open Messages to resume.');
-		} else if (snap.outgoing?.state === 'pending') {
-			showToast('Your session request is still pending.');
-		} else if (Array.isArray(snap.incoming) && snap.incoming.length) {
-			showToast('You have a pending session request.');
+		// Do not restore "recent sessions" from localStorage for any role.
+		// The server `/state` is the only source of truth for session UI.
+		try {
+			globalThis.localStorage?.removeItem(LOCAL_SESSIONS_STORAGE_KEY);
+		} catch {
+			// ignore
 		}
 	}, [authState.user, showToast]);
 
@@ -827,17 +819,6 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 	useEffect(() => {
 		try {
 			globalThis.localStorage?.setItem(ENDED_ROOMS_STORAGE_KEY, JSON.stringify(state.endedRooms));
-			const snapshot: LocalSessionsSnapshot = {
-				outgoing: state.outgoing,
-				incoming: state.incoming,
-				active: state.active,
-				timer: state.timer,
-				ended: state.ended,
-				endedRooms: state.endedRooms,
-				feedbackPrompt: state.feedbackPrompt,
-				feedbackReceived: state.feedbackReceived,
-			};
-			globalThis.localStorage?.setItem(LOCAL_SESSIONS_STORAGE_KEY, JSON.stringify(snapshot));
 		} catch {
 			// ignore
 		}

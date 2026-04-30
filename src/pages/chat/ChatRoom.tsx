@@ -10,7 +10,7 @@ import { useSessions } from '../../context/SessionsContext';
 import { Avatar } from '../../components/ui/Avatar';
 import { TipModal } from '../../components/modals/TipModal';
 import { formatDistanceToNow } from '../../utils/date';
-import type { Message } from '../../types';
+import type { Message, SessionType } from '../../types';
 import { ToastContainer } from '../../components/ui/Toast';
 import { Navbar } from '../../components/layout/Navbar';
 import { useRoomChat } from '../../hooks/useRoomChat';
@@ -18,7 +18,6 @@ import { formatINR } from '../../services/razorpay';
 import { SessionFeedbackModal } from '../../components/session/SessionFeedbackModal';
 import { isUuid } from '../../utils/isUuid';
 import { SessionPickerModal, type SessionPayMode } from '../../components/modals/SessionPickerModal';
-import type { SessionType } from '../../types';
 
 function formatRemaining(sec: number): string {
 	if (!Number.isFinite(sec)) return '—';

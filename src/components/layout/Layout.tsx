@@ -2,6 +2,7 @@ import { Navbar } from './Navbar';
 import { BottomNav } from './BottomNav';
 import { ToastContainer } from '../ui/Toast';
 import { IncomingCallOverlay } from '../call/IncomingCallOverlay';
+import { CallWaitingOverlay } from '../call/CallWaitingOverlay';
 import { IncomingSessionRequestOverlay } from '../session/IncomingSessionRequestOverlay';
 import { SessionFeedbackModal } from '../session/SessionFeedbackModal';
 
@@ -19,6 +20,7 @@ export function Layout({ children }: LayoutProps) {
 			<BottomNav />
 			<ToastContainer />
 			<IncomingCallOverlay />
+			<CallWaitingOverlay />
 			<IncomingSessionRequestOverlay />
 			<SessionFeedbackModal />
 		</div>

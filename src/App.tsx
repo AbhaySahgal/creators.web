@@ -43,7 +43,6 @@ import { ContentModeration } from './pages/admin/ContentModeration';
 import { Settings } from './pages/Settings';
 import { ActiveCallScreen } from './pages/call/ActiveCallScreen';
 import { CallHistory } from './pages/call/CallHistory';
-import { TimedChatRoom } from './pages/session/TimedChatRoom';
 import { LiveStreamRoom } from './pages/live/LiveStreamRoom';
 import { GoLivePage } from './pages/live/GoLivePage';
 import { Contact } from './pages/Contact';
@@ -199,7 +198,6 @@ function AppRoutes() {
 			/>
 			<Route path="/call" element={<ProtectedRoute><ActiveCallScreen /></ProtectedRoute>} />
 			<Route path="/call-history" element={<ProtectedRoute><CallHistory /></ProtectedRoute>} />
-			<Route path="/session/chat/:creatorId" element={<ProtectedRoute><TimedChatRoom /></ProtectedRoute>} />
 			<Route path="/live/:streamId" element={<ProtectedRoute><LiveStreamRoom /></ProtectedRoute>} />
 			<Route path="/go-live" element={<ProtectedRoute roles={['creator']}><GoLivePage /></ProtectedRoute>} />
 

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Phone, PhoneOff, Video } from '../icons';
+import { Phone, PhoneOff } from '../icons';
 import { useCall } from '../../context/CallContext';
 import { useSessions } from '../../context/SessionsContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useNavigate } from 'react-router-dom';
+import { preflightMediaPermissions } from '../../services/mediaPermissions';
 
 export function IncomingCallOverlay() {
 	const { state, acceptCall, declineCall } = useCall();
@@ -41,9 +42,10 @@ export function IncomingCallOverlay() {
 		if (busy) return;
 		if (incomingBooking) {
 			setBusy(true);
-			acceptSession(incomingBooking.request_id)
+			preflightMediaPermissions({ audio: true, video: false })
+				.then(() => acceptSession(incomingBooking.request_id))
 				.then(() => navigate('/call'))
-				.catch(e => showToast(e instanceof Error ? e.message : 'Failed to accept', 'error'))
+				.catch(e => showToast(e instanceof Error ? e.message : 'Please allow microphone access to accept the call.', 'error'))
 				.finally(() => setBusy(false));
 			return;
 		}
@@ -93,6 +95,7 @@ export function IncomingCallOverlay() {
 								onClick={handleDecline}
 								disabled={busy}
 								className="w-16 h-16 bg-rose-500 hover:bg-rose-600 disabled:opacity-50 rounded-full flex items-center justify-center shadow-xl shadow-rose-500/30 transition-all active:scale-90"
+								aria-label="Decline call"
 							>
 								<PhoneOff className="w-7 h-7 text-white" />
 							</button>
@@ -104,6 +107,7 @@ export function IncomingCallOverlay() {
 								onClick={handleAccept}
 								disabled={busy}
 								className="w-16 h-16 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 rounded-full flex items-center justify-center shadow-xl shadow-emerald-500/30 transition-all active:scale-90"
+								aria-label="Accept call"
 							>
 								<Phone className="w-7 h-7 text-white" />
 							</button>

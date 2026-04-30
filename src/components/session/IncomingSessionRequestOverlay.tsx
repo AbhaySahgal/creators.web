@@ -3,6 +3,7 @@ import { MessageCircle, Phone, PhoneOff, Video } from '../icons';
 import { useSessions } from '../../context/SessionsContext';
 import { formatINRFromMinor } from '../../utils/money';
 import { useNotifications } from '../../context/NotificationContext';
+import { preflightMediaPermissions } from '../../services/mediaPermissions';
 
 function centsToMinorString(cents: string): string {
 	const trimmed = (cents ?? '').trim();
@@ -38,7 +39,16 @@ export function IncomingSessionRequestOverlay() {
 	function handleAccept() {
 		if (busy) return;
 		setBusy(true);
-		acceptSession(incoming.request_id)
+
+		const ensurePermissions =
+			isChat ?
+				Promise.resolve() :
+				// For sessions bookings, the server spec is only `kind:"call"`. Preflight both mic+camera
+				// on the Accept gesture so browsers don't block later track creation/publish.
+				preflightMediaPermissions({ audio: true, video: true });
+
+		ensurePermissions
+			.then(() => acceptSession(incoming.request_id))
 			.then(() => {
 				showToast('Accepted session request');
 			})

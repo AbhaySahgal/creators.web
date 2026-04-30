@@ -16,7 +16,15 @@ function formatDuration(secs: number): string {
 	return `${m}:${s}`;
 }
 
-function getStatusText(opts: { isConnecting: boolean, callStatus?: string }): string {
+function getStatusText(opts: {
+	isConnecting: boolean,
+	callStatus?: string,
+	connectionLabel?: string | null,
+	networkLabel?: string | null,
+}): string {
+	// Connection/network labels override the base call status (WhatsApp-like).
+	if (opts.networkLabel) return opts.networkLabel;
+	if (opts.connectionLabel) return opts.connectionLabel;
 	if (opts.isConnecting) {
 		if (opts.callStatus === 'ringing') return 'Calling…';
 		return 'Connecting…';
@@ -51,6 +59,12 @@ export function ActiveCallScreen() {
 	const [hasRemoteAudio, setHasRemoteAudio] = useState(false);
 	const [localMicPublished, setLocalMicPublished] = useState(false);
 	const [agoraError, setAgoraError] = useState('');
+	const [connectionLabel, setConnectionLabel] = useState<string | null>(null);
+	const [networkLabel, setNetworkLabel] = useState<string | null>(null);
+	const touchStartYRef = useRef<number | null>(null);
+	const [showAudioRoute, setShowAudioRoute] = useState(false);
+	const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
+	const [audioOutputId, setAudioOutputId] = useState<string>('default');
 	const fallbackUidRef = useRef<number | null>(null);
 	const agoraClientRef = useRef<ReturnType<typeof AgoraRTC.createClient> | null>(null);
 	const joinedKeyRef = useRef<string | null>(null);
@@ -60,6 +74,7 @@ export function ActiveCallScreen() {
 	const [rtcJoinedKey, setRtcJoinedKey] = useState<string | null>(null);
 	const lastBookedRoomIdRef = useRef<string | null>(null);
 	const notifiedEndRequestIdRef = useRef<string | null>(null);
+	const tokenRenewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	const isTimedSession = session && (session.type === 'audio' || session.type === 'video');
 	const secondsRemaining = sessionState.secondsRemaining;
@@ -141,7 +156,6 @@ export function ActiveCallScreen() {
 		'';
 	// Spec: sessions `kind:"call"` does not differentiate audio vs video.
 	// We treat it as a call with optional camera.
-	const callType = call?.type ?? session?.type ?? 'call';
 	const callStatus = call?.status;
 	const isVideo = true;
 	const isConnecting = callStatus === 'ringing' || callStatus === 'connecting';
@@ -199,7 +213,7 @@ export function ActiveCallScreen() {
 
 		const bookingAgora = sessionsBooking?.accepted.agora ?? null;
 		const channelName = bookingAgora?.channel_name || (sessionsBooking?.accepted.room_id ?? '');
-		const isBookedCall = !!sessionsBooking?.accepted;
+		const bookingIsBookedCall = !!sessionsBooking?.accepted;
 		const bookingRequestId = sessionsBooking?.accepted.request_id ?? null;
 		const appId = bookingAgora?.app_id ?? getAgoraAppId();
 		const token = bookingAgora?.token ?? null;
@@ -217,7 +231,7 @@ export function ActiveCallScreen() {
 		const joinKey = `${appId}|${channelName}|${uid}|${token ?? ''}`;
 
 		return {
-			isBookedCall,
+			isBookedCall: bookingIsBookedCall,
 			bookingRequestId,
 			channelName,
 			uid,
@@ -242,12 +256,12 @@ export function ActiveCallScreen() {
 	useEffect(() => {
 		const p = agoraJoinParams;
 		if (!p) return;
-		const { isBookedCall, bookingRequestId, channelName, uid, appId, token, dummy, joinKey } = p;
+		const { isBookedCall: bookingIsBookedCall, bookingRequestId, channelName, uid, appId, token, dummy, joinKey } = p;
 
 		if (import.meta.env.DEV) {
 			(globalThis as unknown as { CW_AGORA_LAST_JOIN?: unknown }).CW_AGORA_LAST_JOIN = {
 				at: new Date().toISOString(),
-				isBookedCall,
+				isBookedCall: bookingIsBookedCall,
 				request_id: bookingRequestId,
 				channel_name: channelName,
 				uid,
@@ -278,8 +292,9 @@ export function ActiveCallScreen() {
 		agoraClientRef.current = client;
 
 		client.removeAllListeners();
+		setConnectionLabel(null);
+		setNetworkLabel(null);
 		client.on('user-published', (user, mediaType) => {
-			// eslint-disable-next-line no-console
 			console.info('Agora user-published', { uid: user.uid, mediaType });
 			void client.subscribe(user, mediaType).then(() => {
 				if (mediaType === 'audio' && user.audioTrack) {
@@ -305,7 +320,6 @@ export function ActiveCallScreen() {
 		});
 
 		client.on('user-unpublished', (_user, mediaType) => {
-			// eslint-disable-next-line no-console
 			console.info('Agora user-unpublished', { mediaType });
 			if (mediaType === 'video') {
 				setHasRemoteVideo(false);
@@ -318,69 +332,76 @@ export function ActiveCallScreen() {
 			}
 		});
 
+		// WhatsApp-like connection / network indicators (best-effort; SDK emits vary).
+		client.on('connection-state-change', (curState: unknown, _prev: unknown, _reason: unknown) => {
+			const v = (typeof curState === 'string' ? curState : '').toUpperCase();
+			if (v.includes('RECONNECT')) setConnectionLabel('Reconnecting…');
+			else if (v.includes('DISCONNECT')) setConnectionLabel('Reconnecting…');
+			else if (v.includes('CONNECTING')) setConnectionLabel('Connecting…');
+			else if (v.includes('CONNECTED')) setConnectionLabel(null);
+		});
+		client.on('network-quality', (stats: unknown) => {
+			const s = (stats && typeof stats === 'object') ? (stats as Record<string, unknown>) : {};
+			const up = typeof s.uplinkNetworkQuality === 'number' ? s.uplinkNetworkQuality : null;
+			const down = typeof s.downlinkNetworkQuality === 'number' ? s.downlinkNetworkQuality : null;
+			const q = Math.max(Number(up ?? 0), Number(down ?? 0));
+			if (Number.isFinite(q) && q >= 4) setNetworkLabel('Poor network');
+			else setNetworkLabel(null);
+		});
+
 		let cancelled = false;
 
-		const doJoin = async () => {
-			if (isBookedCall && !channelName) {
-				throw new Error('Missing room_id for booked call. Backend must include `room_id` in `sessions|accepted`.');
+		const doJoin = () => {
+			if (bookingIsBookedCall && !channelName) {
+				return Promise.reject(new Error('Missing room_id for booked call. Backend must include `room_id` in `sessions|accepted`.'));
 			}
 			const acceptedToken = token;
+			const resolvedTokenPromise =
+				bookingIsBookedCall ?
+					Promise.resolve(acceptedToken) :
+					(acceptedToken ? Promise.resolve(acceptedToken) : fetchAgoraRtcToken(channelName, uid, 'host'));
 
-			// Spec: for booked calls, accept must mint per-user RTC tokens (or dummy placeholders).
-			// Do not fall back to an HTTP token endpoint for booked calls; if it's missing, the backend is incomplete.
-			const resolvedToken =
-				isBookedCall ? acceptedToken : (acceptedToken ?? await fetchAgoraRtcToken(channelName, uid, 'host'));
-
-			if (!resolvedToken) {
-				throw new Error(
-					isBookedCall ?
-						'Missing Agora token in booking. Backend must include `sessions|accepted.agora.token` for each user.' :
-						'Missing Agora token. Start the call via sessions booking so the server sends `sessions|accepted.agora.token` (or set VITE_AGORA_TOKEN_ENDPOINT to a real HTTP token endpoint).'
-				);
-			}
-
-			await client.join(appId, channelName, resolvedToken, uid);
-			if (cancelled) return;
-
-			// Ensure browser prompts for permissions early and we surface a clear error
-			// (otherwise `createMicrophoneAudioTrack()` can fail in confusing ways).
-			try {
-				const stream = await navigator.mediaDevices.getUserMedia({
-					audio: true,
-					video: false,
+			return resolvedTokenPromise.then(resolvedToken => {
+				if (!resolvedToken) {
+					throw new Error(
+						bookingIsBookedCall ?
+							'Missing Agora token in booking. Backend must include `sessions|accepted.agora.token` for each user.' :
+							'Missing Agora token. Start the call via sessions booking so the server sends `sessions|accepted.agora.token` (or set VITE_AGORA_TOKEN_ENDPOINT to a real HTTP token endpoint).'
+					);
+				}
+				return client.join(appId, channelName, resolvedToken, uid);
+			}).then(() => {
+				if (cancelled) return;
+				// Permissions must be requested on a user gesture (Request/Accept click),
+				// not during async join (browsers can block or behave inconsistently).
+				return undefined;
+			}).then(() => {
+				if (cancelled) return;
+				return AgoraRTC.createMicrophoneAudioTrack().then(audioTrack => {
+					localAudioTrackRef.current = audioTrack;
+					return audioTrack.setEnabled(!isMuted).then(() => audioTrack);
 				});
-				for (const t of stream.getTracks()) t.stop();
-			} catch (e: unknown) {
-				const msg = e instanceof Error ? e.message : String(e);
-				throw new Error(
-					`Microphone permission denied/unavailable. ` +
-					`Please allow mic access in the browser site settings and try again. ` +
-					(msg ? `(${msg})` : '')
-				);
-			}
-
-			const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
-			localAudioTrackRef.current = audioTrack;
-			await audioTrack.setEnabled(!isMuted);
-			try {
-				await client.publish([audioTrack]);
-				setLocalMicPublished(true);
-				// eslint-disable-next-line no-console
-				console.info('Agora publish(mic) ok', { channelName, uid, request_id: bookingRequestId });
-			} catch (e: unknown) {
-				const msg = e instanceof Error ? e.message : String(e);
-				// Also log for quick diagnosis from console screenshots.
-				// eslint-disable-next-line no-console
-				console.error('Agora publish(mic) failed', { channelName, uid, request_id: bookingRequestId, msg });
-				throw new Error(
-					`Failed to publish microphone track. ` +
-					`This usually means the Agora RTC token was minted with subscriber-only privileges (cannot publish). ` +
-					`Ask backend to mint tokens with publish privileges for both users. ` +
-					(msg ? `(${msg})` : '')
-				);
-			}
-			joinedOkRef.current = true;
-			setRtcJoinedKey(joinKey);
+			}).then(audioTrack => {
+				if (cancelled) return;
+				if (!audioTrack) return;
+				return client.publish([audioTrack])
+					.then(() => {
+						setLocalMicPublished(true);
+					})
+					.catch((e: unknown) => {
+						const msg = e instanceof Error ? e.message : String(e);
+						throw new Error(
+							`Failed to publish microphone track. ` +
+							`This usually means the Agora RTC token was minted with subscriber-only privileges (cannot publish). ` +
+							`Ask backend to mint tokens with publish privileges for both users. ` +
+							(msg ? `(${msg})` : '')
+						);
+					});
+			}).then(() => {
+				if (cancelled) return;
+				joinedOkRef.current = true;
+				setRtcJoinedKey(joinKey);
+			});
 		};
 
 		const pJoin = doJoin()
@@ -408,6 +429,8 @@ export function ActiveCallScreen() {
 
 		return () => {
 			cancelled = true;
+			setConnectionLabel(null);
+			setNetworkLabel(null);
 
 			// React 18 StrictMode (dev) mounts + immediately unmounts effects once to detect unsafe side effects.
 			// If we leave during that dev-only cleanup, Agora cancels the in-flight join ("cancel token canceled").
@@ -447,6 +470,55 @@ export function ActiveCallScreen() {
 		};
 	}, [agoraJoinParams?.joinKey]);
 
+	// Refresh Agora RTC token before expiry when a token endpoint is configured.
+	useEffect(() => {
+		if (tokenRenewTimerRef.current) {
+			clearTimeout(tokenRenewTimerRef.current);
+			tokenRenewTimerRef.current = null;
+		}
+		const client = agoraClientRef.current as (ReturnType<typeof AgoraRTC.createClient> & { renewToken?: (t: string) => Promise<void> }) | null;
+		if (!client) return;
+		if (!joinedOkRef.current) return;
+		if (!rtcJoinedKey) return;
+
+		const bookingAgora = sessionsBooking?.accepted?.agora ?? null;
+		if (!bookingAgora) return;
+		if (bookingAgora.dummy) return;
+		if (!bookingAgora.expires_at) return;
+
+		const expiresAtMs = new Date(bookingAgora.expires_at).getTime();
+		if (!Number.isFinite(expiresAtMs)) return;
+
+		// Only renew when we have a minting endpoint configured in this build.
+		// `fetchAgoraRtcToken` returns null when `VITE_AGORA_TOKEN_ENDPOINT` is not set.
+		const channel = bookingAgora.channel_name || sessionsBooking?.accepted?.room_id || '';
+		const uid = bookingAgora.uid;
+		if (!channel || !uid) return;
+
+		const renewAtMs = expiresAtMs - 5 * 60_000; // 5 minutes before expiry
+		const delayMs = Math.max(10_000, renewAtMs - Date.now()); // never schedule too aggressively
+
+		tokenRenewTimerRef.current = setTimeout(() => {
+			void fetchAgoraRtcToken(channel, uid, 'host')
+				.then(newToken => {
+					if (!newToken) return;
+					if (typeof client.renewToken === 'function') {
+						return client.renewToken(newToken);
+					}
+					// Some SDK builds use `renewToken` but typings can differ; ignore if unavailable.
+					return undefined;
+				})
+				.catch(() => {});
+		}, delayMs);
+
+		return () => {
+			if (tokenRenewTimerRef.current) {
+				clearTimeout(tokenRenewTimerRef.current);
+				tokenRenewTimerRef.current = null;
+			}
+		};
+	}, [rtcJoinedKey, sessionsBooking?.accepted?.agora?.expires_at, sessionsBooking?.accepted?.agora?.uid, sessionsBooking?.accepted?.agora?.channel_name, sessionsBooking?.accepted?.room_id]);
+
 	// Video publish/unpublish should not trigger a re-join.
 	useEffect(() => {
 		const client = agoraClientRef.current;
@@ -476,14 +548,36 @@ export function ActiveCallScreen() {
 		let cancelled = false;
 		void AgoraRTC.createCameraVideoTrack()
 			.then(videoTrack => {
+				// #region agent log
+				fetch('http://127.0.0.1:7376/ingest/dacc4137-b3f3-4a4a-97cf-28b8bb043d99',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f82690'},body:JSON.stringify({sessionId:'f82690',runId:'cam-bug',hypothesisId:'V1',location:'ActiveCallScreen.tsx:camera:create',message:'Created camera track',data:{hasTrack:!!videoTrack},timestamp:Date.now()})}).catch(()=>{});
+				// #endregion
+				try {
+					(videoTrack as unknown as { on?: (ev: string, fn: () => void) => void }).on?.('track-ended', () => {
+						// #region agent log
+						fetch('http://127.0.0.1:7376/ingest/dacc4137-b3f3-4a4a-97cf-28b8bb043d99',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f82690'},body:JSON.stringify({sessionId:'f82690',runId:'cam-bug',hypothesisId:'V2',location:'ActiveCallScreen.tsx:camera:track-ended',message:'Camera track ended',data:{},timestamp:Date.now()})}).catch(()=>{});
+						// #endregion
+					});
+				} catch {
+					// ignore
+				}
 				if (cancelled) {
 					videoTrack.close();
 					return;
 				}
 				localVideoTrackRef.current = videoTrack;
 				if (localVideoRef.current) videoTrack.play(localVideoRef.current);
-				return client.publish([videoTrack]).catch((e: unknown) => {
+				// #region agent log
+				fetch('http://127.0.0.1:7376/ingest/dacc4137-b3f3-4a4a-97cf-28b8bb043d99',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f82690'},body:JSON.stringify({sessionId:'f82690',runId:'cam-bug',hypothesisId:'V3',location:'ActiveCallScreen.tsx:camera:publish:begin',message:'Publishing camera track',data:{},timestamp:Date.now()})}).catch(()=>{});
+				// #endregion
+				return client.publish([videoTrack]).then(() => {
+					// #region agent log
+					fetch('http://127.0.0.1:7376/ingest/dacc4137-b3f3-4a4a-97cf-28b8bb043d99',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f82690'},body:JSON.stringify({sessionId:'f82690',runId:'cam-bug',hypothesisId:'V3',location:'ActiveCallScreen.tsx:camera:publish:ok',message:'Published camera track OK',data:{},timestamp:Date.now()})}).catch(()=>{});
+					// #endregion
+				}).catch((e: unknown) => {
 					const msg = e instanceof Error ? e.message : String(e);
+					// #region agent log
+					fetch('http://127.0.0.1:7376/ingest/dacc4137-b3f3-4a4a-97cf-28b8bb043d99',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f82690'},body:JSON.stringify({sessionId:'f82690',runId:'cam-bug',hypothesisId:'V4',location:'ActiveCallScreen.tsx:camera:publish:fail',message:'Publish camera failed',data:{err:String(msg??'').slice(0,180)},timestamp:Date.now()})}).catch(()=>{});
+					// #endregion
 					setAgoraError(
 						`Failed to publish camera track. ` +
 						`This usually means the Agora RTC token was minted without publish privileges. ` +
@@ -492,6 +586,9 @@ export function ActiveCallScreen() {
 				});
 			})
 			.catch(() => {
+				// #region agent log
+				fetch('http://127.0.0.1:7376/ingest/dacc4137-b3f3-4a4a-97cf-28b8bb043d99',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f82690'},body:JSON.stringify({sessionId:'f82690',runId:'cam-bug',hypothesisId:'V5',location:'ActiveCallScreen.tsx:camera:create:fail',message:'createCameraVideoTrack failed',data:{},timestamp:Date.now()})}).catch(()=>{});
+				// #endregion
 				setAgoraError('Failed to start camera video.');
 			});
 
@@ -528,11 +625,44 @@ export function ActiveCallScreen() {
 		}
 	}, [isSpeakerOn, hasRemoteAudio, rtcJoinedKey]);
 
+	useEffect(() => {
+		if (!showAudioRoute) return;
+		if (!navigator.mediaDevices?.enumerateDevices) return;
+		void navigator.mediaDevices.enumerateDevices()
+			.then(list => {
+				const outs = list.filter(d => d.kind === 'audiooutput');
+				setAudioOutputs(outs);
+			})
+			.catch(() => {
+				setAudioOutputs([]);
+			});
+	}, [showAudioRoute]);
+
 	return (
 		<div
 			className="fixed inset-0 z-[300] bg-overlay flex flex-col"
-			onTouchStart={resetControlsTimer}
-			onClick={resetControlsTimer}
+			onTouchStart={e => {
+				touchStartYRef.current = e.touches?.[0]?.clientY ?? null;
+				resetControlsTimer();
+			}}
+			onTouchEnd={e => {
+				const startY = touchStartYRef.current;
+				const endY = e.changedTouches?.[0]?.clientY ?? null;
+				if (startY != null && endY != null) {
+					const dy = endY - startY;
+					if (dy > 30) setShowControls(true);
+					if (dy < -30 && isVideo) setShowControls(false);
+				}
+				touchStartYRef.current = null;
+			}}
+			onClick={e => {
+				// Tap background toggles controls (WhatsApp-like). Clicking UI keeps them visible.
+				if (e.target === e.currentTarget) {
+					setShowControls(v => !v);
+					return;
+				}
+				resetControlsTimer();
+			}}
 		>
 			{/* WhatsApp-like top bar */}
 			<div className={`absolute top-0 left-0 right-0 z-30 px-4 pt-4 pb-3 ${hideControls ? 'opacity-0 pointer-events-none' : 'opacity-100'} transition-opacity duration-300`}>
@@ -553,7 +683,7 @@ export function ActiveCallScreen() {
 					<div className="min-w-0">
 						<p className="text-sm font-semibold text-white truncate">{participantName}</p>
 						<p className="text-[11px] text-white/70 truncate">
-							{getStatusText({ isConnecting, callStatus })}
+							{getStatusText({ isConnecting, callStatus, connectionLabel, networkLabel })}
 							{!isConnecting ? ` · ${timerDisplay}` : ''}
 						</p>
 					</div>
@@ -642,10 +772,23 @@ export function ActiveCallScreen() {
 						)}
 					</div>
 
+					{hasRemoteAudio ? (
+						<div className="flex justify-center mb-6">
+							<button
+								type="button"
+								onClick={() => setShowAudioRoute(true)}
+								className="text-[11px] px-3 py-1.5 rounded-full bg-black/30 hover:bg-black/40 text-white/80 backdrop-blur border border-white/10"
+							>
+								Output: {audioOutputs.find(d => d.deviceId === audioOutputId)?.label || (audioOutputId === 'default' ? 'Default' : 'Device')}
+							</button>
+						</div>
+					) : null}
+
 					<div className="flex justify-center">
 						<button
 							onClick={handleEndCall}
 							className="w-16 h-16 bg-rose-500 hover:bg-rose-600 rounded-full flex items-center justify-center shadow-xl shadow-rose-500/40 transition-all active:scale-90"
+							aria-label="End call"
 						>
 							<Phone className="w-7 h-7 text-white rotate-[135deg]" />
 						</button>
@@ -653,6 +796,59 @@ export function ActiveCallScreen() {
 				</div>
 			</div>
 			<SessionFeedbackModal />
+
+			{showAudioRoute ? (
+				<div className="fixed inset-0 z-[310] flex items-end sm:items-center justify-center p-0 sm:p-4">
+					<div className="absolute inset-0 bg-overlay/70 backdrop-blur-sm" onClick={() => setShowAudioRoute(false)} />
+					<div className="relative w-full sm:max-w-md bg-surface border border-border/20 rounded-t-3xl sm:rounded-3xl overflow-hidden shadow-2xl">
+						<div className="p-4 border-b border-border/10 flex items-center gap-3">
+							<p className="text-sm font-bold text-foreground">Audio output</p>
+							<button
+								type="button"
+								onClick={() => setShowAudioRoute(false)}
+								className="ml-auto text-xs px-3 py-1.5 rounded-xl bg-foreground/5 hover:bg-foreground/10 text-muted"
+							>
+								Close
+							</button>
+						</div>
+						<div className="p-4 space-y-2 max-h-[50vh] overflow-auto">
+							{typeof navigator.mediaDevices?.enumerateDevices === 'function' ? null : (
+								<p className="text-xs text-muted">Audio device selection is not supported in this browser.</p>
+							)}
+							{audioOutputs.length ? (
+								audioOutputs.map(d => (
+									<button
+										key={d.deviceId}
+										type="button"
+										onClick={() => {
+											setAudioOutputId(d.deviceId);
+											const t = remoteAudioTrackRef.current as unknown as { setPlaybackDevice?: (id: string) => Promise<void> };
+											if (t?.setPlaybackDevice) {
+												void t.setPlaybackDevice(d.deviceId)
+													.then(() => showToast('Audio output updated'))
+													.catch(() => showToast('Failed to switch audio output', 'error'));
+											} else {
+												showToast('This browser/SDK cannot switch audio output.', 'error');
+											}
+											setShowAudioRoute(false);
+										}}
+										className={`w-full text-left px-3 py-2 rounded-2xl border transition-colors ${
+											audioOutputId === d.deviceId ?
+												'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
+												'border-border/20 bg-foreground/5 hover:bg-foreground/10 text-foreground'
+										}`}
+									>
+										<p className="text-sm font-semibold truncate">{d.label || 'Audio output'}</p>
+										<p className="text-[11px] text-muted truncate">{d.deviceId}</p>
+									</button>
+								))
+							) : (
+								<p className="text-xs text-muted">No output devices found.</p>
+							)}
+						</div>
+					</div>
+				</div>
+			) : null}
 		</div>
 	);
 }
@@ -672,6 +868,7 @@ function ControlBtn({
 		<div className="flex flex-col items-center gap-2">
 			<button
 				onClick={onPress}
+				aria-label={label}
 				className={`w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-90 backdrop-blur ${
 					active ?
 						'bg-black/30 hover:bg-black/40 text-white' :
