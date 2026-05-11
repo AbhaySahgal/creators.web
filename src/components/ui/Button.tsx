@@ -22,10 +22,13 @@ export function Button({
 	disabled,
 	...rest
 }: ButtonProps) {
-	const base = 'inline-flex items-center justify-center gap-2 font-semibold rounded-xl transition-all duration-200 select-none';
+	const base =
+		'inline-flex items-center justify-center gap-2 font-semibold rounded-xl transition-all duration-200 select-none ' +
+		'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background ' +
+		'disabled:opacity-50 disabled:cursor-not-allowed';
 
 	const variants = {
-		primary: 'bg-rose-500 hover:bg-rose-600 active:scale-95 text-white shadow-lg shadow-rose-500/20 disabled:opacity-50',
+		primary: 'bg-rose-500 hover:bg-rose-600 active:scale-95 text-white shadow-lg shadow-rose-500/20',
 		secondary: 'bg-foreground/10 hover:bg-foreground/20 active:scale-95 text-foreground',
 		ghost: 'hover:bg-foreground/10 active:scale-95 text-muted hover:text-foreground',
 		danger: 'bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30',
