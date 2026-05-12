@@ -29,7 +29,7 @@ export function CreatorProfile() {
 	const { id: creatorUserId } = useParams<{ id: string }>();
 	const navigate = useNavigate();
 	const { state: authState } = useAuth();
-	const { state: contentState, isSubscribed, loadCreatorPosts, creatorWsGetByUserId } = useContent();
+	const { state: contentState, isSubscribed, loadCreatorPosts, creatorWsGetByUserId, syncFanFollowFromViewer } = useContent();
 	const { showToast } = useNotifications();
 	const { addConversation, getConversationForUser } = useChat();
 	const { startCall } = useCall();
@@ -47,6 +47,13 @@ export function CreatorProfile() {
 	const [followBusy, setFollowBusy] = useState(false);
 	const [isFollowed, setIsFollowed] = useState<boolean>(false);
 	const hasLoadedCreatorRef = useRef(false);
+
+	const fanFollowHint = creatorUserId ? contentState.fanFollowByCreator[creatorUserId] : undefined;
+
+	useEffect(() => {
+		if (fanFollowHint === undefined) return;
+		setIsFollowed(fanFollowHint);
+	}, [fanFollowHint]);
 
 	const maybeCreator = useMemo(() => mockCreators.find(c => c.id === creatorUserId), [creatorUserId]);
 	const cachedDisplay = useMemo(() => (creatorUserId ? contentState.creatorProfiles[creatorUserId] : undefined), [creatorUserId, contentState.creatorProfiles]);
@@ -81,7 +88,9 @@ export function CreatorProfile() {
 				if (ac.signal.aborted) return;
 				if (r.creator) {
 					hasLoadedCreatorRef.current = true;
-					setIsFollowed(Boolean((r.creator as unknown as { is_followed?: boolean | null }).is_followed));
+					const followed = Boolean((r.creator as unknown as { is_followed?: boolean | null }).is_followed);
+					setIsFollowed(followed);
+					syncFanFollowFromViewer(creatorUserId, followed);
 					setRemoteCreator(creatorProfileDtoToCreator(r.creator, base));
 					return;
 				}
@@ -109,7 +118,7 @@ export function CreatorProfile() {
 			});
 
 		return () => ac.abort();
-	}, [creatorUserId, maybeCreator, creatorWsGetByUserId, contentState.postsWsStatus]);
+	}, [creatorUserId, maybeCreator, creatorWsGetByUserId, contentState.postsWsStatus, syncFanFollowFromViewer, showToast, fallbackCreator]);
 
 	useEffect(() => {
 		if (!creatorUserId) return;
@@ -233,7 +242,9 @@ export function CreatorProfile() {
 		const op = isFollowed ? creatorUnfollow : creatorFollow;
 		void op(ws, creatorForDisplay.id)
 			.then(() => {
-				setIsFollowed(prev => !prev);
+				const next = !isFollowed;
+				setIsFollowed(next);
+				syncFanFollowFromViewer(creatorForDisplay.id, next);
 				showToast(isFollowed ? 'Unfollowed.' : 'You are now following this creator.');
 			})
 			.catch((err: unknown) => {

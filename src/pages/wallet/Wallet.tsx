@@ -12,7 +12,8 @@ import { formatINRFromMinor } from '../../utils/money';
 import type { RazorpayOrderRow } from '../../services/paymentWs';
 import { useSubscriptions } from '../../context/SubscriptionContext';
 import { useContent } from '../../context/ContentContext';
-import { subscriptionAmountMinor, subscriptionId, subscriptionUiStatus } from '../../services/subscriptionUi';
+import { useNotifications } from '../../context/NotificationContext';
+import { subscriptionAmountMinor, subscriptionId, subscriptionUiStatus, subscriptionAutoRenew } from '../../services/subscriptionUi';
 
 const ADD_FUND_PRESETS_INR = [100, 250, 500, 1000, 2000, 5000];
 
@@ -111,6 +112,7 @@ function OrderRow({ o }: { o: RazorpayOrderRow }) {
 
 export function Wallet() {
 	const { state: authState } = useAuth();
+	const { showToast } = useNotifications();
 	const {
 		addFundsViaRazorpay,
 		getUserTransactions,
@@ -120,7 +122,7 @@ export function Wallet() {
 		refreshWalletData,
 		state: walletState,
 	} = useWallet();
-	const { byCreatorUserId, cancel: cancelWsSubscription, loading: subsLoading, error: subsError } = useSubscriptions();
+	const { byCreatorUserId, cancel: cancelWsSubscription, loading: subsLoading, error: subsError, toggleAutoRenew: toggleWsAutoRenew } = useSubscriptions();
 	const { creatorWsGetByUserId } = useContent();
 	const [showAddFunds, setShowAddFunds] = useState(false);
 	const [addAmount, setAddAmount] = useState(500);
@@ -130,6 +132,7 @@ export function Wallet() {
 	const [payError, setPayError] = useState('');
 	const [activeTab, setActiveTab] = useState<'transactions' | 'subscriptions' | 'orders'>('transactions');
 	const [creatorDisplay, setCreatorDisplay] = useState<Record<string, { name: string, avatar: string }>>({});
+	const [renewBusyId, setRenewBusyId] = useState<string | null>(null);
 
 	const user = authState.user;
 	const userId = user?.id ?? '';
@@ -347,17 +350,47 @@ export function Wallet() {
 															</div>
 															<span className="text-sm font-bold text-rose-400">{s.amountMinor ? `${formatINRFromMinor(s.amountMinor)}/mo` : '—'}</span>
 														</div>
-														<div className="flex gap-2">
-															<button
-																disabled={!s.subscriptionId}
-																onClick={() => {
-																	if (!s.subscriptionId) return;
-																	void cancelWsSubscription(s.subscriptionId);
-																}}
-																className="flex-1 text-xs py-1.5 rounded-xl font-medium border border-rose-500/20 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-colors disabled:opacity-50"
-															>
-																Cancel subscription
-															</button>
+														<div className="flex flex-col gap-2">
+															<label className="flex items-center justify-between gap-2 text-xs text-muted cursor-pointer select-none">
+																<span>Auto-renew monthly</span>
+																<input
+																	type="checkbox"
+																	className="sr-only peer"
+																	checked={subscriptionAutoRenew(s.dto)}
+																	disabled={!s.subscriptionId || renewBusyId === s.subscriptionId}
+																	onChange={() => {
+																		if (!s.subscriptionId) return;
+																		setRenewBusyId(s.subscriptionId);
+																		void toggleWsAutoRenew(s.subscriptionId)
+																			.catch(err => {
+																				showToast(err instanceof Error ? err.message : 'Could not update auto-renew', 'error');
+																			})
+																			.finally(() => setRenewBusyId(null));
+																	}}
+																/>
+																<span
+																	className={[
+																		'relative inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors',
+																		'bg-foreground/10 border-border/30',
+																		'peer-checked:bg-emerald-500/40 peer-checked:border-emerald-500/30',
+																		'peer-disabled:opacity-50',
+																		"after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow-sm after:transition-transform after:duration-200",
+																		'peer-checked:after:translate-x-4',
+																	].join(' ')}
+																/>
+															</label>
+															<div className="flex gap-2">
+																<button
+																	disabled={!s.subscriptionId}
+																	onClick={() => {
+																		if (!s.subscriptionId) return;
+																		void cancelWsSubscription(s.subscriptionId);
+																	}}
+																	className="flex-1 text-xs py-1.5 rounded-xl font-medium border border-rose-500/20 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-colors disabled:opacity-50"
+																>
+																	Cancel subscription
+																</button>
+															</div>
 														</div>
 													</div>
 												);

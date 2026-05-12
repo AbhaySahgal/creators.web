@@ -1,6 +1,6 @@
 import type { CreatorsMultiplexWs } from './creatorsMultiplexWs';
 import type { WsClient } from './wsClient';
-import type { CreatorGetResponse, CreatorListResponse, CreatorUpsertResponse } from './creatorWsTypes';
+import type { CreatorGetResponse, CreatorListResponse, CreatorUpsertResponse, CreatorListFollowersResponse } from './creatorWsTypes';
 
 export interface CreatorFollowResponse {
 	ok: true;
@@ -102,4 +102,21 @@ export function creatorUnfollow(ws: WsClient, creatorUserId: string, requestId?:
 	const rid = requestId?.trim() || undefined;
 	if (rid && /\s/.test(rid)) throw new Error('requestId must not contain spaces');
 	return ws.request('creator', 'unfollow', [id], rid).then(json => json as CreatorUnfollowResponse);
+}
+
+/** `creator /listfollowers <creatorUserId> [limit] [beforeCursor]` — optional followers directory (missing_apis_v1). */
+export function creatorListFollowers(
+	ws: WsClient,
+	creatorUserId: string,
+	limit = 30,
+	beforeCursor?: string
+): Promise<CreatorListFollowersResponse> {
+	const id = String(creatorUserId).trim();
+	if (!id) throw new Error('creatorUserId is required');
+	if (/\s/.test(id)) throw new Error('creatorUserId must not contain whitespace');
+	const lim = Math.min(50, Math.max(1, Number.isFinite(limit) ? limit : 30));
+	const args: string[] = [id, String(lim)];
+	const cur = beforeCursor?.trim();
+	if (cur) args.push(cur);
+	return ws.request('creator', 'listfollowers', args).then(json => json as CreatorListFollowersResponse);
 }

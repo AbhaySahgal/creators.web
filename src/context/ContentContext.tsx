@@ -13,8 +13,9 @@ import { useEnsureWsAuth, useWs, useWsAuthReady, useWsConnected } from './WsCont
 import { isPostsMockMode } from '../services/postsMode';
 import {
 	buildCreatorListCommand,
+	creatorListFollowers,
 } from '../services/creatorWsService';
-import type { CreatorGetResponse, CreatorListResponse } from '../services/creatorWsTypes';
+import type { CreatorGetResponse, CreatorListResponse, CreatorListFollowersResponse } from '../services/creatorWsTypes';
 import type {
 	CommentDTO,
 	DeletedPostEventPayload,
@@ -54,6 +55,8 @@ interface ContentState {
 	commentPagination: Record<string, string | null>;
 	creatorCursors: Record<string, string | null>;
 	creatorProfiles: Record<string, CreatorDisplay>;
+	/** Current viewer's follow relationship to a creator user id (WS `followed`/`unfollowed` + `creator/get`). */
+	fanFollowByCreator: Record<string, boolean>;
 }
 
 type ContentAction =
@@ -71,7 +74,9 @@ type ContentAction =
 	{ type: 'MERGE_POSTS_LIST', payload: { posts: Post[], nextCursor: string | null, listKind: 'feed' | 'explore' | 'creator', creatorId?: string, replaceExploreOrder?: boolean } } |
 	{ type: 'SET_POST_COMMENTS', payload: { postId: string, comments: Comment[], nextCursor: string | null, mode: 'replace' | 'append' } } |
 	{ type: 'SET_WS', payload: { status: PostsWsStatus, error?: string | null } } |
-	{ type: 'SET_CREATOR_PROFILES', payload: Record<string, CreatorDisplay> };
+	{ type: 'SET_CREATOR_PROFILES', payload: Record<string, CreatorDisplay> } |
+	{ type: 'SET_FAN_FOLLOW_VIEW', payload: { creatorUserId: string, followed: boolean } } |
+	{ type: 'RESET_FAN_FOLLOW_STATE' };
 
 const initialState: ContentState = {
 	posts: [],
@@ -84,6 +89,7 @@ const initialState: ContentState = {
 	commentPagination: {},
 	creatorCursors: {},
 	creatorProfiles: {},
+	fanFollowByCreator: {},
 };
 
 function sortPostsNewestFirst(posts: Post[]): Post[] {
@@ -298,6 +304,17 @@ function contentReducer(state: ContentState, action: ContentAction): ContentStat
 				}),
 			};
 		}
+		case 'SET_FAN_FOLLOW_VIEW': {
+			const { creatorUserId, followed } = action.payload;
+			const id = String(creatorUserId).trim();
+			if (!id) return state;
+			return {
+				...state,
+				fanFollowByCreator: { ...state.fanFollowByCreator, [id]: followed },
+			};
+		}
+		case 'RESET_FAN_FOLLOW_STATE':
+			return { ...state, fanFollowByCreator: {} };
 		default:
 			return state;
 	}
@@ -336,6 +353,10 @@ interface ContentContextValue {
 	/** Resolve creator profile by author user id (user_id from posts). */
 	creatorWsGetByUserId: (creatorUserId: string) => Promise<CreatorGetResponse>;
 	creatorWsUpsert: (username: string, name: string, bio?: string) => Promise<void>;
+	/** Fan's follow flag for a creator user id (synced from WS pushes + `creator/get`). */
+	syncFanFollowFromViewer: (creatorUserId: string, followed: boolean) => void;
+	/** `creator /listfollowers` (missing_apis_v1). */
+	creatorWsListFollowers: (creatorUserId: string, limit?: number, beforeCursor?: string) => Promise<CreatorListFollowersResponse>;
 }
 
 const ContentContext = createContext<ContentContextValue | null>(null);
@@ -651,6 +672,46 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 			})()).then(() => {}),
 		[wsRequestLine]
 	);
+
+	const syncFanFollowFromViewer = useCallback((creatorUserId: string, followed: boolean) => {
+		const id = String(creatorUserId).trim();
+		if (!id) return;
+		dispatch({ type: 'SET_FAN_FOLLOW_VIEW', payload: { creatorUserId: id, followed } });
+	}, []);
+
+	const creatorWsListFollowersCb = useCallback(
+		(creatorUserId: string, limit = 30, beforeCursor?: string): Promise<CreatorListFollowersResponse> =>
+			ensureWsAuth().then(() => creatorListFollowers(ws, creatorUserId, limit, beforeCursor)),
+		[ws, ensureWsAuth]
+	);
+
+	useEffect(() => {
+		if (!authState.user) dispatch({ type: 'RESET_FAN_FOLLOW_STATE' });
+	}, [authState.user?.id]);
+
+	useEffect(() => {
+		if (!wsConnected) return;
+		const me = authState.user?.id?.trim();
+		if (!me) return;
+		const onFollowPayload = (data: unknown, followed: boolean) => {
+			if (!data || typeof data !== 'object') return;
+			const d = data as Record<string, unknown>;
+			const follower =
+				typeof d.follower_user_id === 'string' ? d.follower_user_id :
+				typeof d.followerUserId === 'string' ? d.followerUserId : '';
+			const creator =
+				typeof d.creator_user_id === 'string' ? d.creator_user_id :
+				typeof d.creatorUserId === 'string' ? d.creatorUserId : '';
+			if (follower.trim() !== me || !creator.trim()) return;
+			dispatch({ type: 'SET_FAN_FOLLOW_VIEW', payload: { creatorUserId: creator.trim(), followed } });
+		};
+		const offFollowed = ws.on('creator', 'followed', data => onFollowPayload(data, true));
+		const offUnfollowed = ws.on('creator', 'unfollowed', data => onFollowPayload(data, false));
+		return () => {
+			offFollowed();
+			offUnfollowed();
+		};
+	}, [ws, wsConnected, authState.user?.id]);
 
 	useEffect(() => {
 		// Spec: creators must `creator /upsertprofile` to appear in creator directory.
@@ -1016,6 +1077,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				creatorWsGetByPk,
 				creatorWsGetByUserId,
 				creatorWsUpsert,
+				syncFanFollowFromViewer,
+				creatorWsListFollowers: creatorWsListFollowersCb,
 			}}
 		>
 			{children}

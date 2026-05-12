@@ -8,6 +8,8 @@ export type CreatorProfileResponse = User & {
 	bio?: string,
 	banner?: string,
 	category?: string,
+	/** HTTP parity with WS `subscription_price_minor` when backend sends it. */
+	subscriptionPriceMinor?: string | null,
 };
 
 function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse {
@@ -30,8 +32,12 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 		(typeof obj.banner_url === 'string' && obj.banner_url) ||
 		undefined;
 
+	const minRaw = obj.subscription_price_minor ?? obj.subscriptionPriceMinor;
+	let subscriptionPriceMinor: string | null = null;
+	if (typeof minRaw === 'string' && /^\d+$/.test(minRaw.trim())) subscriptionPriceMinor = minRaw.trim();
+	else if (typeof minRaw === 'number' && Number.isFinite(minRaw) && minRaw >= 0) subscriptionPriceMinor = String(Math.round(minRaw));
+
 	return {
-		...(obj as unknown as User),
 		id: asString(obj.id ?? obj.user_id),
 		email: asString(obj.email),
 		name: asString(obj.name),
@@ -41,7 +47,8 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 		bio: typeof obj.bio === 'string' ? obj.bio : undefined,
 		banner,
 		category: typeof obj.category === 'string' ? obj.category : undefined,
-	};
+		...(subscriptionPriceMinor ? { subscriptionPriceMinor } : {}),
+	} as CreatorProfileResponse;
 }
 
 export interface RegisterRequest {

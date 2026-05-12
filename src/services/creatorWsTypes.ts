@@ -31,3 +31,16 @@ export interface CreatorGetResponse {
 export interface CreatorUpsertResponse {
 	creator: CreatorProfileDTO;
 }
+
+/** `creator /listfollowers` row (missing_apis_v1 UserSummary). */
+export interface CreatorFollowerUserSummary {
+	id: string;
+	name: string;
+	username: string;
+	avatar_url: string | null;
+}
+
+export interface CreatorListFollowersResponse {
+	followers: CreatorFollowerUserSummary[];
+	nextCursor: string | null;
+}

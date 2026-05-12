@@ -64,6 +64,7 @@ interface SubscriptionContextValue {
 	subscribeWallet: (creatorUserId: string, autoRenew: boolean) => Promise<SubscriptionDTO>;
 	subscribeViaCheckout: (creatorUserId: string, amountInrRupees: number) => Promise<CheckoutResult>;
 	cancel: (subscriptionId: string) => Promise<void>;
+	toggleAutoRenew: (subscriptionId: string) => Promise<void>;
 	getSubscriptionForCreator: (creatorUserId: string) => SubscriptionDTO | null;
 	getSubscriptionsForCreator: (creatorUserId: string) => SubscriptionDTO[];
 }
@@ -302,6 +303,17 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 			});
 	}, [ensureWsAuth, subscription]);
 
+	const toggleAutoRenew = useCallback((subId: string) => {
+		return ensureWsAuth()
+			.then(() => subscription.toggleAutoRenew(subId))
+			.then(resp => {
+				const dto = resp.subscription;
+				const creatorUserId = subscriptionCreatorUserId(dto);
+				if (!creatorUserId) return;
+				setByCreatorUserId(prev => ({ ...prev, [creatorUserId]: upsertById(prev[creatorUserId] ?? [], dto) }));
+			});
+	}, [ensureWsAuth, subscription]);
+
 	const value = useMemo<SubscriptionContextValue>(() => ({
 		ready,
 		loading,
@@ -314,9 +326,10 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 		subscribeWallet,
 		subscribeViaCheckout,
 		cancel,
+		toggleAutoRenew,
 		getSubscriptionForCreator,
 		getSubscriptionsForCreator,
-	}), [ready, loading, error, byCreatorUserId, currentByCreatorUserId, activeByCreatorUserId, listMine, isSubscribed, subscribeWallet, subscribeViaCheckout, cancel, getSubscriptionForCreator, getSubscriptionsForCreator]);
+	}), [ready, loading, error, byCreatorUserId, currentByCreatorUserId, activeByCreatorUserId, listMine, isSubscribed, subscribeWallet, subscribeViaCheckout, cancel, toggleAutoRenew, getSubscriptionForCreator, getSubscriptionsForCreator]);
 
 	return (
 		<SubscriptionContext.Provider value={value}>

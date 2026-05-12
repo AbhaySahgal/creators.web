@@ -36,6 +36,13 @@ export function subscriptionUiStatus(dto: SubscriptionDTO): SubscriptionUiStatus
 	return 'active';
 }
 
+/** `auto_renew` / `autoRenew` from subscription DTO (missing_apis_v1). */
+export function subscriptionAutoRenew(dto: SubscriptionDTO): boolean {
+	if (typeof dto.auto_renew === 'boolean') return dto.auto_renew;
+	if (typeof dto.autoRenew === 'boolean') return dto.autoRenew;
+	return true;
+}
+
 export function subscriptionAmountMinor(dto: SubscriptionDTO): string | null {
 	const v =
 		typeof dto.price_cents === 'string' ? dto.price_cents :

@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useState } from 'react';
-import type { Transaction, Subscription, User } from '../types';
-import { mockSubscriptions } from '../data/transactions';
+import type { Transaction, User } from '../types';
 import { useAuth } from './AuthContext';
 import { useWs, useWsConnected } from './WsContext';
 import { openRazorpayCheckout, isPaymentCancelled } from '../services/razorpay';
@@ -12,7 +11,6 @@ import { getSessionToken } from '../services/sessionToken';
 interface WalletState {
 	/** Local-only rows (e.g. wallet pay / demo top-up before server ledger reflects). */
 	transactions: Transaction[];
-	subscriptions: Subscription[];
 	ledgerRows: LedgerTransactionRow[];
 	razorpayOrders: RazorpayOrderRow[];
 	historyNextCursor: string | null;
@@ -21,9 +19,6 @@ interface WalletState {
 
 type WalletAction =
 	{ type: 'ADD_TRANSACTION', payload: Transaction } |
-	{ type: 'ADD_SUBSCRIPTION', payload: Subscription } |
-	{ type: 'CANCEL_SUBSCRIPTION', payload: string } |
-	{ type: 'TOGGLE_AUTO_RENEW', payload: string } |
 	{ type: 'SET_LEDGER', payload: { rows: LedgerTransactionRow[], nextCursor: string | null } } |
 	{ type: 'APPEND_LEDGER', payload: { rows: LedgerTransactionRow[], nextCursor: string | null } } |
 	{ type: 'SET_ORDERS', payload: RazorpayOrderRow[] } |
@@ -31,7 +26,6 @@ type WalletAction =
 
 const initialState: WalletState = {
 	transactions: [],
-	subscriptions: mockSubscriptions,
 	ledgerRows: [],
 	razorpayOrders: [],
 	historyNextCursor: null,
@@ -42,22 +36,6 @@ function walletReducer(state: WalletState, action: WalletAction): WalletState {
 	switch (action.type) {
 		case 'ADD_TRANSACTION':
 			return { ...state, transactions: [action.payload, ...state.transactions] };
-		case 'ADD_SUBSCRIPTION':
-			return { ...state, subscriptions: [action.payload, ...state.subscriptions] };
-		case 'CANCEL_SUBSCRIPTION':
-			return {
-				...state,
-				subscriptions: state.subscriptions.map(s =>
-					s.id === action.payload ? { ...s, isActive: false, autoRenew: false } : s
-				),
-			};
-		case 'TOGGLE_AUTO_RENEW':
-			return {
-				...state,
-				subscriptions: state.subscriptions.map(s =>
-					s.id === action.payload ? { ...s, autoRenew: !s.autoRenew } : s
-				),
-			};
 		case 'SET_LEDGER':
 			return {
 				...state,
@@ -122,11 +100,7 @@ interface WalletContextValue {
 	payViaRazorpay: (amountRupees: number, type: Transaction['type'], description: string, recipientId?: string, recipientName?: string) => Promise<{ ok: boolean, cancelled?: boolean, error?: string }>;
 	/** Backwards-compatible name used by older modals. */
 	payExternally: (amountRupees: number, type: Transaction['type'], description: string, recipientId?: string, recipientName?: string) => Promise<{ ok: boolean, cancelled?: boolean, error?: string }>;
-	cancelSubscription: (subscriptionId: string) => void;
-	toggleAutoRenew: (subscriptionId: string) => void;
-	addSubscription: (subscription: Subscription) => void;
 	getUserTransactions: (userId: string) => Transaction[];
-	getUserSubscriptions: (userId: string) => Subscription[];
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -274,18 +248,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 		dispatch({ type: 'ADD_TRANSACTION', payload: tx });
 		return true;
 	}, [authState.user, updateWalletMinor]);
-
-	const cancelSubscription = useCallback((subscriptionId: string) => {
-		dispatch({ type: 'CANCEL_SUBSCRIPTION', payload: subscriptionId });
-	}, []);
-
-	const toggleAutoRenew = useCallback((subscriptionId: string) => {
-		dispatch({ type: 'TOGGLE_AUTO_RENEW', payload: subscriptionId });
-	}, []);
-
-	const addSubscription = useCallback((subscription: Subscription) => {
-		dispatch({ type: 'ADD_SUBSCRIPTION', payload: subscription });
-	}, []);
 
 	/**
 	 * Create server order → Razorpay Checkout (or local dev confirm) → POST confirm.
@@ -445,10 +407,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 		return merged;
 	}, [state.ledgerRows, state.transactions]);
 
-	const getUserSubscriptions = useCallback((userId: string) => {
-		return state.subscriptions.filter(s => s.userId === userId);
-	}, [state.subscriptions]);
-
 	return (
 		<WalletContext.Provider value={{
 			state,
@@ -466,11 +424,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 			deductFunds,
 			payViaRazorpay,
 			payExternally: payViaRazorpay,
-			cancelSubscription,
-			toggleAutoRenew,
-			addSubscription,
 			getUserTransactions,
-			getUserSubscriptions,
 		}}
 		>
 			{children}

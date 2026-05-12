@@ -22,6 +22,7 @@ import { useNotifications } from '../../context/NotificationContext';
 import { mockCreators } from '../../data/users';
 import { formatINR } from '../../services/razorpay';
 import { ApiError, creatorsApi } from '../../services/creatorsApi';
+import type { CreatorFollowerUserSummary } from '../../services/creatorWsTypes';
 import { minorStringToInrNumber } from '../../utils/money';
 
 function StatCard({ label, value, sub, icon, color, onClick }: {
@@ -71,11 +72,13 @@ export function CreatorDashboard() {
 	const creator = useCurrentCreator();
 	const { state: authState, updateUser } = useAuth();
 	const { showToast } = useNotifications();
-	const { state: contentState, loadCreatorPosts } = useContent();
+	const { state: contentState, loadCreatorPosts, creatorWsListFollowers, postsWsStatus } = useContent();
 	const { state: sessionState } = useSession();
 	const [editingRate, setEditingRate] = useState(false);
 	const [rateInput, setRateInput] = useState('');
 	const [rateSaving, setRateSaving] = useState(false);
+	const [socialFollowers, setSocialFollowers] = useState<CreatorFollowerUserSummary[]>([]);
+	const [socialFollowersLoading, setSocialFollowersLoading] = useState(false);
 
 	const dash = authState.user?.role === 'creator' ? authState.user.creatorDashboard : undefined;
 
@@ -185,6 +188,23 @@ export function CreatorDashboard() {
 		if (!creatorUserIdForPosts) return;
 		void loadCreatorPosts(creatorUserIdForPosts, true);
 	}, [creatorUserIdForPosts, loadCreatorPosts]);
+
+	useEffect(() => {
+		if (!authedCreatorId || postsWsStatus !== 'ready') return;
+		let cancelled = false;
+		setSocialFollowersLoading(true);
+		void creatorWsListFollowers(authedCreatorId, 12)
+			.then(r => {
+				if (!cancelled) setSocialFollowers(r.followers ?? []);
+			})
+			.catch(() => {
+				if (!cancelled) setSocialFollowers([]);
+			})
+			.finally(() => {
+				if (!cancelled) setSocialFollowersLoading(false);
+			});
+		return () => { cancelled = true; };
+	}, [authedCreatorId, postsWsStatus, creatorWsListFollowers]);
 
 	const creatorPosts = contentState.posts.filter(p => p.creatorId === creatorUserIdForPosts);
 
@@ -395,6 +415,37 @@ export function CreatorDashboard() {
 							</div>
 						)}
 					</div>
+				</div>
+
+				<div className="bg-surface border border-border/20 rounded-2xl p-4 mb-4">
+					<div className="flex items-center justify-between mb-3">
+						<div>
+							<h3 className="text-sm font-semibold text-foreground">Recent followers (social)</h3>
+							<p className="text-[10px] text-muted/80 mt-0.5">Loaded via <code className="text-[10px] bg-foreground/5 px-1 rounded">creator /listfollowers</code> (social follows, not paid subscribers).</p>
+						</div>
+						<Users className="w-4 h-4 text-muted/70" />
+					</div>
+					{socialFollowersLoading ? (
+						<p className="text-xs text-muted py-2">Loading…</p>
+					) : socialFollowers.length === 0 ? (
+						<p className="text-xs text-muted py-2">No social followers yet, or the server returned an empty list.</p>
+					) : (
+						<div className="space-y-2.5">
+							{socialFollowers.map(f => (
+								<div key={f.id} className="flex items-center gap-2.5">
+									{f.avatar_url ? (
+										<img src={f.avatar_url} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
+									) : (
+										<div className="w-9 h-9 rounded-full bg-foreground/10 shrink-0" />
+									)}
+									<div className="flex-1 min-w-0">
+										<p className="text-xs font-medium text-foreground truncate">{f.name}</p>
+										<p className="text-[10px] text-muted/80 truncate">@{f.username}</p>
+									</div>
+								</div>
+							))}
+						</div>
+					)}
 				</div>
 
 				<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
