@@ -67,3 +67,8 @@ export function formatINRFromMinor(minor: string | undefined | null): string {
 		maximumFractionDigits: 2,
 	}).format(rupees);
 }
+
+/** Convert API minor-unit string (e.g. paise) to INR rupees as a number for charts and legacy `Creator` fields. */
+export function minorStringToInrNumber(minor: string | undefined | null): number {
+	return Number(parseMinor(minor ?? '')) / 100;
+}

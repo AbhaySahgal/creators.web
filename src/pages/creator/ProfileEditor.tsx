@@ -9,10 +9,11 @@ import { mockCreators } from '../../data/users';
 import { ApiError, creatorsApi } from '../../services/creatorsApi';
 import { uploadMediaAsset } from '../../services/mediaUpload';
 import { formatINR } from '../../services/razorpay';
+import { inrRupeesToMinor } from '../../utils/money';
 
 export function ProfileEditor() {
 	const creator = useCurrentCreator();
-	const { state: authState, updateUser } = useAuth();
+	const { state: authState, updateUser, updateCreatorProfile } = useAuth();
 	const { creatorWsUpsert } = useContent();
 	const { showToast } = useNotifications();
 
@@ -68,18 +69,29 @@ export function ProfileEditor() {
 		const bannerPromise = bannerFile ? uploadMediaAsset('banner', bannerFile).then(r => r.assetId) : Promise.resolve(undefined);
 
 		void Promise.all([avatarPromise, bannerPromise])
-			.then(([avatarAssetId, bannerAssetId]) =>
-				creatorsApi.me.updateProfile({
+			.then(([avatarAssetId, bannerAssetId]) => {
+				const rupees = parseFloat(price);
+				const subscriptionPriceMinor =
+					Number.isFinite(rupees) && rupees >= 0 ? Math.round(rupees * 100) : undefined;
+				return creatorsApi.me.updateProfile({
 					name: name.trim() || undefined,
 					username: username.trim() || undefined,
 					bio: bio.trim() || undefined,
 					category: category?.trim() || undefined,
 					avatarAssetId,
 					bannerAssetId,
-				})
-			)
+					...(subscriptionPriceMinor !== undefined ? { subscriptionPriceMinor } : {}),
+				});
+			})
 			.then(({ user }) => {
 				updateUser(user);
+				const rupees = parseFloat(price);
+				if (Number.isFinite(rupees) && rupees >= 0) {
+					updateCreatorProfile({
+						subscriptionPrice: rupees,
+						subscriptionPriceMinor: inrRupeesToMinor(rupees),
+					});
+				}
 				void creatorWsUpsert(
 					username.trim() || creatorData.username,
 					name.trim() || creatorData.name,
@@ -92,11 +104,13 @@ export function ProfileEditor() {
 			.catch(err => {
 				if (err instanceof ApiError) {
 					const body = err.body;
-					const msg =
-						typeof body === 'object' && body && 'message' in body && typeof (body as { message?: unknown }).message === 'string' ?
-							(body as { message: string }).message :
-							`Save failed (HTTP ${err.status}).`;
-					showToast(msg, 'error');
+					const errMsg =
+						typeof body === 'object' && body && 'error' in body && typeof (body as { error?: unknown }).error === 'string' ?
+							(body as { error: string }).error :
+							typeof body === 'object' && body && 'message' in body && typeof (body as { message?: unknown }).message === 'string' ?
+								(body as { message: string }).message :
+								`Save failed (HTTP ${err.status}).`;
+					showToast(errMsg, 'error');
 					return;
 				}
 				showToast(err instanceof Error ? err.message : 'Save failed.', 'error');

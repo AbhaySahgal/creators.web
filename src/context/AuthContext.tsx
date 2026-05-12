@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { signInWithPopup, signOut, signOut as firebaseSignOut } from 'firebase/auth';
-import type { User, Creator } from '../types';
+import type { User, Creator, CreatorDashboard, CreatorDashboardMonthlyStat, CreatorDashboardSessionRow } from '../types';
 import { mockCreators } from '../data/users';
 import { delayMs } from '../utils/delay';
 import { isFirebaseConfigured, firebaseMissingConfigKeys } from '../config/firebase';
@@ -10,7 +10,7 @@ import { clearSessionToken, getSessionToken } from '../services/sessionToken';
 import { clearStoredUser, setStoredUser } from '../services/sessionUser';
 import { clearPaymentGatewayCache } from '../services/payments';
 import { runCreatorsWsTeardown } from '../services/wsLogoutRegistry';
-import { ZERO_MINOR } from '../utils/money';
+import { ZERO_MINOR, minorStringToInrNumber } from '../utils/money';
 
 interface AuthState {
 	user: User | null;
@@ -43,7 +43,109 @@ const initialState: AuthState = {
 	creatorProfiles: {},
 };
 
-/** Ensure `walletBalanceMinor` and string `id` for API / mock user payloads. */
+function parseMonthlyStatRow(v: unknown): CreatorDashboardMonthlyStat | null {
+	if (!v || typeof v !== 'object') return null;
+	const o = v as Record<string, unknown>;
+	const month = typeof o.month === 'string' ? o.month : '';
+	const earningsCents =
+		typeof o.earningsCents === 'string' ? o.earningsCents :
+		typeof o.earnings_cents === 'string' ? o.earnings_cents :
+		'';
+	if (!month || !/^\d+$/.test(earningsCents.trim())) return null;
+	return { month, earningsCents: earningsCents.trim() };
+}
+
+function parseSessionHistoryRow(v: unknown): CreatorDashboardSessionRow | null {
+	if (!v || typeof v !== 'object') return null;
+	const o = v as Record<string, unknown>;
+	const requestId = typeof o.requestId === 'string' ? o.requestId : typeof o.request_id === 'string' ? o.request_id : '';
+	const type = o.type === 'chat' || o.type === 'call' ? o.type : 'chat';
+	const status = typeof o.status === 'string' ? o.status : '';
+	const fanUserId = typeof o.fanUserId === 'string' ? o.fanUserId : typeof o.fan_user_id === 'string' ? o.fan_user_id : '';
+	const fanName = typeof o.fanName === 'string' ? o.fanName : typeof o.fan_name === 'string' ? o.fan_name : '';
+	const durationMinutes =
+		typeof o.durationMinutes === 'number' ? o.durationMinutes :
+		typeof o.duration_minutes === 'number' ? o.duration_minutes :
+		null;
+	const earningsCents =
+		typeof o.earningsCents === 'string' ? o.earningsCents :
+		typeof o.earnings_cents === 'string' ? o.earnings_cents :
+		'0';
+	const createdAt = typeof o.createdAt === 'string' ? o.createdAt : typeof o.created_at === 'string' ? o.created_at : '';
+	const completedAt =
+		o.completedAt == null ? null :
+		typeof o.completedAt === 'string' ? o.completedAt :
+		typeof o.completed_at === 'string' ? o.completed_at :
+		null;
+	if (!requestId || !createdAt) return null;
+	return {
+		requestId,
+		type,
+		status,
+		fanUserId,
+		fanName,
+		durationMinutes,
+		earningsCents: /^\d+$/.test(earningsCents.trim()) ? earningsCents.trim() : '0',
+		actualDurationSeconds: null,
+		createdAt,
+		completedAt,
+	};
+}
+
+function parseCreatorDashboardFromApi(raw: unknown): CreatorDashboard | undefined {
+	if (!raw || typeof raw !== 'object') return undefined;
+	const d = raw as Record<string, unknown>;
+	const kycRaw = d.kycStatus ?? d.kyc_status;
+	const kycStatus =
+		kycRaw === 'not_submitted' || kycRaw === 'pending' || kycRaw === 'approved' || kycRaw === 'rejected' ?
+			kycRaw :
+			'not_submitted';
+	const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+	const str = (v: unknown, fallback = '0'): string => {
+		if (typeof v === 'string' && /^\d+$/.test(v.trim())) return v.trim();
+		if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return String(Math.round(v));
+		return fallback;
+	};
+	const src = d.earningsBySource ?? d.earnings_by_source;
+	let earningsBySource = {
+		subscriptionsCents: '0',
+		tipsCents: '0',
+		sessionsCents: '0',
+	};
+	if (src && typeof src === 'object') {
+		const e = src as Record<string, unknown>;
+		earningsBySource = {
+			subscriptionsCents: str(e.subscriptionsCents ?? e.subscriptions_cents, '0'),
+			tipsCents: str(e.tipsCents ?? e.tips_cents, '0'),
+			sessionsCents: str(e.sessionsCents ?? e.sessions_cents, '0'),
+		};
+	}
+	const statsRaw = Array.isArray(d.monthlyStats) ? d.monthlyStats : Array.isArray(d.monthly_stats) ? d.monthly_stats : [];
+	const monthlyStats = statsRaw.map(parseMonthlyStatRow).filter((x): x is CreatorDashboardMonthlyStat => x != null);
+	const histRaw = Array.isArray(d.sessionHistory) ? d.sessionHistory : Array.isArray(d.session_history) ? d.session_history : [];
+	const sessionHistory = histRaw.map(parseSessionHistoryRow).filter((x): x is CreatorDashboardSessionRow => x != null);
+	const pm =
+		d.perMinuteRateCents ?? d.perMinute_rate_cents ?? d.per_minute_rate_cents;
+	const perMinuteRateCents =
+		typeof pm === 'number' && Number.isFinite(pm) ? pm :
+		typeof pm === 'string' && /^\d+$/.test(pm.trim()) ? Number(pm.trim()) :
+		null;
+
+	return {
+		kycStatus,
+		followerCount: num(d.followerCount ?? d.follower_count),
+		subscriberCount: num(d.subscriberCount ?? d.subscriber_count),
+		totalEarningsCents: str(d.totalEarningsCents ?? d.total_earnings_cents, '0'),
+		monthlyEarningsCents: str(d.monthlyEarningsCents ?? d.monthly_earnings_cents, '0'),
+		tipsReceivedCents: str(d.tipsReceivedCents ?? d.tips_received_cents, '0'),
+		earningsBySource,
+		monthlyStats,
+		sessionHistory,
+		perMinuteRateCents,
+	};
+}
+
+/** Ensure `walletBalanceMinor`, string `id`, and optional `creatorDashboard` for API / mock user payloads. */
 function normalizeUserFromApi(payload: User): User {
 	const raw = payload as unknown as Record<string, unknown>;
 	const id =
@@ -53,22 +155,26 @@ function normalizeUserFromApi(payload: User): User {
 
 	let minor =
 		typeof raw.walletBalanceMinor === 'string' ? raw.walletBalanceMinor :
-		typeof raw.walletBalanceMinor === 'number' ? String(raw.walletBalanceMinor) :
+		typeof raw.walletBalanceMinor === 'number' ? String(Math.max(0, Math.round(raw.walletBalanceMinor))) :
 		'';
 	if (!minor && raw.walletBalance != null) {
-		// Backend spec: `walletBalance` on GET /me user payload.
-		// Treat numeric as INR rupees and convert to paise; accept stringified minor as-is.
-		if (typeof raw.walletBalance === 'number') {
-			minor = String(Math.max(0, Math.round(raw.walletBalance * 100)));
+		// Handoff doc: `walletBalance` is minor units (same scale as `walletBalanceMinor`).
+		if (typeof raw.walletBalance === 'number' && Number.isFinite(raw.walletBalance)) {
+			minor = String(Math.max(0, Math.round(raw.walletBalance)));
 		} else if (typeof raw.walletBalance === 'string' && /^\d+$/.test(raw.walletBalance.trim())) {
 			minor = raw.walletBalance.trim();
 		}
 	}
 	if (!minor) minor = ZERO_MINOR;
+
+	const dashRaw = raw.creatorDashboard ?? raw.creator_dashboard;
+	const creatorDashboard = parseCreatorDashboardFromApi(dashRaw);
+
 	return {
 		...payload,
 		id,
 		walletBalanceMinor: /^\d+$/.test(minor) ? minor : ZERO_MINOR,
+		...(creatorDashboard ? { creatorDashboard } : {}),
 	};
 }
 
@@ -103,6 +209,44 @@ function createCreatorProfileFromUser(user: User): Creator {
 	};
 }
 
+/** Build a `Creator` view from session user + optional `creatorDashboard` (GET /me). */
+export function creatorFromSessionUser(user: User): Creator {
+	const base = createCreatorProfileFromUser(user);
+	const dash = user.creatorDashboard;
+	const bio = user.bio ?? base.bio;
+	const banner = user.banner ?? base.banner;
+	const category = user.category ?? base.category;
+	if (!dash) {
+		return {
+			...base,
+			bio,
+			banner,
+			category,
+		};
+	}
+	const monthlyStats = dash.monthlyStats.map(m => ({
+		month: m.month,
+		earnings: minorStringToInrNumber(m.earningsCents),
+		subscribers: 0,
+		tips: 0,
+	}));
+	return {
+		...base,
+		bio,
+		banner,
+		category,
+		kycStatus: dash.kycStatus,
+		isKYCVerified: dash.kycStatus === 'approved',
+		subscriberCount: dash.subscriberCount,
+		likeCount: dash.followerCount,
+		totalEarnings: minorStringToInrNumber(dash.totalEarningsCents),
+		monthlyEarnings: minorStringToInrNumber(dash.monthlyEarningsCents),
+		tipsReceived: minorStringToInrNumber(dash.tipsReceivedCents),
+		perMinuteRate: dash.perMinuteRateCents != null ? dash.perMinuteRateCents / 100 : base.perMinuteRate,
+		monthlyStats,
+	};
+}
+
 function authReducer(state: AuthState, action: AuthAction): AuthState {
 	switch (action.type) {
 		case 'LOGIN':
@@ -124,19 +268,24 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 			return { ...state, loginError: '' };
 		case 'UPDATE_USER':
 			if (!state.user) return state;
-			return {
-				...state,
-				user: { ...state.user, ...action.payload },
-				creatorProfiles: state.user.role === 'creator' && state.creatorProfiles[state.user.id] ?
-					{
-						...state.creatorProfiles,
-						[state.user.id]: {
-							...state.creatorProfiles[state.user.id],
-							...action.payload,
-						},
-					} :
-					state.creatorProfiles,
-			};
+			{
+				const merged = normalizeUserFromApi({ ...state.user, ...action.payload });
+				const nextCreatorProfiles =
+					merged.role === 'creator' ?
+						{
+							...state.creatorProfiles,
+							[merged.id]: {
+								...(state.creatorProfiles[merged.id] ?? createCreatorProfileFromUser(merged)),
+								...creatorFromSessionUser(merged),
+							},
+						} :
+						state.creatorProfiles;
+				return {
+					...state,
+					user: merged,
+					creatorProfiles: nextCreatorProfiles,
+				};
+			}
 		case 'UPDATE_WALLET_MINOR':
 			return {
 				...state,
@@ -506,21 +655,9 @@ export function useCurrentCreator(): Creator | null {
 	const { state } = useAuth();
 	if (state.user?.role !== 'creator') return null;
 	const currentUser = state.user;
-	const creatorMatch = mockCreators.find(c => c.id === currentUser.id);
-	if (creatorMatch) return creatorMatch;
-
-	return {
-		...mockCreators[0],
-		id: currentUser.id,
-		name: currentUser.name,
-		email: currentUser.email,
-		username: currentUser.username,
-		avatar: currentUser.avatar,
-		bio: currentUser.bio ?? mockCreators[0].bio,
-		banner: currentUser.banner ?? mockCreators[0].banner,
-		category: currentUser.category ?? mockCreators[0].category,
-		createdAt: currentUser.createdAt,
-		status: currentUser.status,
-		walletBalanceMinor: currentUser.walletBalanceMinor,
-	};
+	const fromMock = mockCreators.find(c => c.id === currentUser.id);
+	if (fromMock) return fromMock;
+	const stored = state.creatorProfiles[currentUser.id];
+	if (stored) return stored;
+	return creatorFromSessionUser(currentUser);
 }

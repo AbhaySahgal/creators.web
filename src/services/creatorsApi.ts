@@ -1,4 +1,4 @@
-import type { User } from '../types';
+import type { NotificationSettings, User } from '../types';
 import { getSessionToken, setSessionToken } from './sessionToken';
 
 export type PreferredRole = 'fan' | 'creator';
@@ -81,6 +81,18 @@ export interface UpdateMyProfileRequest {
 	bannerAssetId?: string;
 	bannerUrl?: string;
 	category?: string;
+	/** Integer ≥ 0, minor units (e.g. paise). Upserts creator profile when set with other creator fields. */
+	subscriptionPriceMinor?: number;
+	/** Integer ≥ 0, minor units per minute for timed sessions. */
+	perMinuteRate?: number;
+}
+
+export interface NotificationSettingsResponse {
+	settings: NotificationSettings;
+}
+
+export interface UpdateNotificationSettingsRequest {
+	settings: Partial<NotificationSettings>;
 }
 
 export interface UpdateMyProfileResponse {
@@ -252,8 +264,10 @@ export const creatorsApi = {
 					return data;
 				});
 		},
+		/** Bearer optional: without token backend may return `{ user: null }`. */
 		me(signal?: AbortSignal): Promise<MeResponse> {
-			return requestJson<MeResponse>('/me', { method: 'GET', auth: true, signal });
+			const token = getSessionToken();
+			return requestJson<MeResponse>('/me', { method: 'GET', auth: Boolean(token), signal });
 		},
 		/** Caller must clear local session after this resolves (see AuthContext.logout). */
 		logout(): Promise<{ ok: true }> {
@@ -263,6 +277,12 @@ export const creatorsApi = {
 	me: {
 		updateProfile(body: UpdateMyProfileRequest): Promise<UpdateMyProfileResponse> {
 			return requestJson<UpdateMyProfileResponse>('/me/profile', { method: 'POST', body, auth: true });
+		},
+		getNotificationSettings(signal?: AbortSignal): Promise<NotificationSettingsResponse> {
+			return requestJson<NotificationSettingsResponse>('/me/notification-settings', { method: 'GET', auth: true, signal });
+		},
+		updateNotificationSettings(body: UpdateNotificationSettingsRequest): Promise<NotificationSettingsResponse> {
+			return requestJson<NotificationSettingsResponse>('/me/notification-settings', { method: 'PUT', body, auth: true });
 		},
 	},
 	payments: {

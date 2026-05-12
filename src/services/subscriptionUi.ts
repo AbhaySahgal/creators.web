@@ -38,6 +38,8 @@ export function subscriptionUiStatus(dto: SubscriptionDTO): SubscriptionUiStatus
 
 export function subscriptionAmountMinor(dto: SubscriptionDTO): string | null {
 	const v =
+		typeof dto.price_cents === 'string' ? dto.price_cents :
+		typeof dto.price_cents === 'number' ? String(Math.max(0, Math.round(dto.price_cents))) :
 		typeof dto.amount_cents === 'string' ? dto.amount_cents :
 		typeof dto.amount_minor === 'string' ? dto.amount_minor :
 		typeof dto.amountMinor === 'number' ? String(dto.amountMinor) :

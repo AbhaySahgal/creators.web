@@ -6,9 +6,10 @@ import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useSubscriptions } from '../../context/SubscriptionContext';
 import { formatINR } from '../../services/razorpay';
-import { compareMinor, formatINRFromMinor, inrRupeesToMinor } from '../../utils/money';
+import { compareMinor, formatINRFromMinor, minorStringToInrNumber } from '../../utils/money';
 import type { Creator } from '../../types';
 import { delayMs } from '../../utils/delay';
+import { creatorSubscriptionMinorUnits } from '../../services/creatorWsMap';
 
 interface SubscribeModalProps {
 	isOpen: boolean;
@@ -35,8 +36,8 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 	const [error, setError] = useState('');
 
 	const balanceMinor = authState.user?.walletBalanceMinor ?? '0';
-	const inrPrice = creator.subscriptionPrice;
-	const subMinor = inrRupeesToMinor(creator.subscriptionPrice);
+	const subMinor = creatorSubscriptionMinorUnits(creator);
+	const inrPrice = minorStringToInrNumber(subMinor);
 	const canAffordWallet = compareMinor(balanceMinor, '>=', subMinor);
 
 	function completeSubscription() {
@@ -52,7 +53,7 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 			setError('');
 
 			if (payMode === 'external') {
-				void subscribeViaCheckout(creator.id, creator.subscriptionPrice).then(result => {
+				void subscribeViaCheckout(creator.id, inrPrice).then(result => {
 					if (result.ok) {
 						completeSubscription();
 					} else if (!result.cancelled) {
@@ -154,7 +155,7 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 							onClick={() => { void handleSubscribe(); }}
 							disabled={payMode === 'wallet' && !canAffordWallet}
 						>
-							Subscribe for {formatINR(creator.subscriptionPrice)}/month
+							Subscribe for {formatINRFromMinor(subMinor)}/month
 						</Button>
 						{payMode === 'wallet' && !canAffordWallet && (
 							<p className="text-center text-xs text-rose-400 mt-2">

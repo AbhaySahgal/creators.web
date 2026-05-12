@@ -15,6 +15,8 @@ export interface CreatorProfileDTO extends CreatorSummaryDTO {
 	/** Optional extra fields present on some backends (used for follow UI). */
 	follower_count?: number | string | null;
 	is_followed?: boolean | null;
+	/** Integer string, minor units; authoritative for subscription debit (missing_apis_v1). */
+	subscription_price_minor?: string | null;
 }
 
 export interface CreatorListResponse {

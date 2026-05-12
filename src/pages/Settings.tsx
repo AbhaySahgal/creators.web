@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { User, Bell, Shield, LogOut, Eye, EyeOff, Save, Camera } from '../components/icons';
 import { useNavigate } from 'react-router-dom';
 import { Layout } from '../components/layout/Layout';
@@ -31,6 +31,61 @@ export function Settings() {
 		likes: true,
 		system: true,
 	});
+	const [notifLoading, setNotifLoading] = useState(false);
+	const [notifSaving, setNotifSaving] = useState(false);
+	const notifSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	useEffect(() => {
+		if (!user) return;
+		setNotifLoading(true);
+		void creatorsApi.me.getNotificationSettings()
+			.then(({ settings }) => {
+				setNotifPrefs({
+					messages: settings.messages,
+					subscriptions: settings.subscriptions,
+					tips: settings.tips,
+					likes: settings.likes,
+					system: settings.system,
+				});
+			})
+			.catch(() => {
+				// Backend may not be ready; keep defaults.
+			})
+			.finally(() => setNotifLoading(false));
+		return () => {
+			if (notifSaveTimerRef.current) {
+				clearTimeout(notifSaveTimerRef.current);
+				notifSaveTimerRef.current = null;
+			}
+		};
+	}, [user?.id]);
+
+	const persistNotifPrefs = useCallback((next: typeof notifPrefs) => {
+		if (!user) return;
+		setNotifSaving(true);
+		void creatorsApi.me.updateNotificationSettings({ settings: next })
+			.then(({ settings }) => {
+				setNotifPrefs({
+					messages: settings.messages,
+					subscriptions: settings.subscriptions,
+					tips: settings.tips,
+					likes: settings.likes,
+					system: settings.system,
+				});
+			})
+			.catch(() => {
+				showToast('Could not save notification settings.', 'error');
+			})
+			.finally(() => setNotifSaving(false));
+	}, [user, showToast]);
+
+	function scheduleNotifSave(next: typeof notifPrefs) {
+		if (notifSaveTimerRef.current) clearTimeout(notifSaveTimerRef.current);
+		notifSaveTimerRef.current = setTimeout(() => {
+			persistNotifPrefs(next);
+			notifSaveTimerRef.current = null;
+		}, 450);
+	}
 
 	function handleSaveProfile() {
 		setIsSaving(true);
@@ -217,6 +272,12 @@ export function Settings() {
 						<Bell className="w-4 h-4 text-rose-400" />
 						<h2 className="font-semibold text-foreground">Notifications</h2>
 					</div>
+					<p className="text-xs text-muted mb-3">
+						Follow and unfollow alerts use the <span className="text-foreground/90 font-medium">likes</span> toggle.
+						New subscribers, cancellations, and subscription expiry use <span className="text-foreground/90 font-medium">subscriptions</span>.
+					</p>
+					{notifLoading && <p className="text-xs text-muted mb-2">Loading preferences…</p>}
+					{notifSaving && <p className="text-xs text-muted mb-2">Saving…</p>}
 					<div className="space-y-3">
 						{(Object.keys(notifPrefs) as (keyof typeof notifPrefs)[]).map(key => (
 							<div key={key} className="flex items-center justify-between">
@@ -226,7 +287,12 @@ export function Settings() {
 										type="checkbox"
 										className="sr-only peer"
 										checked={notifPrefs[key]}
-										onChange={() => setNotifPrefs(p => ({ ...p, [key]: !p[key] }))}
+										disabled={notifLoading}
+										onChange={() => {
+											const next = { ...notifPrefs, [key]: !notifPrefs[key] };
+											setNotifPrefs(next);
+											scheduleNotifSave(next);
+										}}
 										role="switch"
 										aria-label={`${String(key)} notifications`}
 									/>

@@ -164,9 +164,22 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 			});
 		}));
 
+		const expiredServices = ['subscription', 'subscriptions'];
+		const offExpired = expiredServices.map(svc => ws.on(svc, 'expired', data => {
+			const dto = (data && typeof data === 'object' ? data : null) as SubscriptionDTO | null;
+			if (!dto) return;
+			const creatorUserId = subscriptionCreatorUserId(dto);
+			if (!creatorUserId) return;
+			setByCreatorUserId(prev => ({
+				...prev,
+				[creatorUserId]: upsertById(prev[creatorUserId] ?? [], dto),
+			}));
+		}));
+
 		return () => {
 			offCreated.forEach(fn => fn());
 			offCancelled.forEach(fn => fn());
+			offExpired.forEach(fn => fn());
 		};
 	}, [ws, wsConnected]);
 

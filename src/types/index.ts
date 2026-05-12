@@ -97,6 +97,50 @@ export type TransactionType = 'subscription' | 'tip' | 'ppv' | 'deposit' | 'with
 export type ReportStatus = 'pending' | 'resolved' | 'dismissed';
 export type AccountStatus = 'active' | 'suspended' | 'banned';
 
+/** GET /me `creatorDashboard` when user has a creator profile and role is creator or admin (missing_apis_v1). */
+export interface CreatorDashboardSessionRow {
+	requestId: string;
+	type: 'chat' | 'call';
+	status: string;
+	fanUserId: string;
+	fanName: string;
+	durationMinutes: number | null;
+	earningsCents: string;
+	actualDurationSeconds: number | null;
+	createdAt: string;
+	completedAt: string | null;
+}
+
+export interface CreatorDashboardMonthlyStat {
+	month: string;
+	earningsCents: string;
+}
+
+export interface CreatorDashboard {
+	kycStatus: 'not_submitted' | 'pending' | 'approved' | 'rejected';
+	followerCount: number;
+	subscriberCount: number;
+	totalEarningsCents: string;
+	monthlyEarningsCents: string;
+	tipsReceivedCents: string;
+	earningsBySource: {
+		subscriptionsCents: string,
+		tipsCents: string,
+		sessionsCents: string,
+	};
+	monthlyStats: CreatorDashboardMonthlyStat[];
+	sessionHistory: CreatorDashboardSessionRow[];
+	perMinuteRateCents: number | null;
+}
+
+export interface NotificationSettings {
+	messages: boolean;
+	subscriptions: boolean;
+	tips: boolean;
+	likes: boolean;
+	system: boolean;
+}
+
 export interface User {
 	id: string;
 	email: string;
@@ -114,12 +158,16 @@ export interface User {
 	status: AccountStatus;
 	/** INR paise as decimal string (API `balance_cents` / `amount_cents` scale). */
 	walletBalanceMinor: string;
+	/** Present on session when backend attaches dashboard payload (creator/admin with creator profile). */
+	creatorDashboard?: CreatorDashboard;
 }
 
 export interface Creator extends User {
 	bio: string;
 	banner: string;
 	subscriptionPrice: number;
+	/** From `creator/get` `subscription_price_minor` when present — integer string, minor units (authoritative for wallet subscribe). */
+	subscriptionPriceMinor?: string | null;
 	totalEarnings: number;
 	monthlyEarnings: number;
 	tipsReceived: number;
