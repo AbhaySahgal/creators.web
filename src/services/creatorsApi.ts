@@ -30,6 +30,22 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 		(typeof obj.banner_url === 'string' && obj.banner_url) ||
 		undefined;
 
+	const subscriptionPriceMinorRaw =
+		typeof obj.subscriptionPriceMinor === 'number' ? String(Math.floor(obj.subscriptionPriceMinor)) :
+		typeof obj.subscriptionPriceMinor === 'string' ? obj.subscriptionPriceMinor :
+		typeof obj.subscription_price_minor === 'number' ? String(Math.floor(obj.subscription_price_minor)) :
+		typeof obj.subscription_price_minor === 'string' ? obj.subscription_price_minor :
+		'';
+	const subscriptionPriceMinor = /^\d+$/.test(subscriptionPriceMinorRaw.trim()) ? subscriptionPriceMinorRaw.trim() : undefined;
+
+	const perMinuteRateMinorRaw =
+		typeof obj.perMinuteRate === 'number' ? String(Math.floor(obj.perMinuteRate)) :
+		typeof obj.per_minute_rate === 'number' ? String(Math.floor(obj.per_minute_rate)) :
+		typeof obj.perMinuteRateMinor === 'string' ? obj.perMinuteRateMinor :
+		typeof obj.per_minute_rate === 'string' ? obj.per_minute_rate :
+		'';
+	const perMinuteRateMinor = /^\d+$/.test(perMinuteRateMinorRaw.trim()) ? perMinuteRateMinorRaw.trim() : undefined;
+
 	return {
 		...(obj as unknown as User),
 		id: asString(obj.id ?? obj.user_id),
@@ -41,6 +57,8 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 		bio: typeof obj.bio === 'string' ? obj.bio : undefined,
 		banner,
 		category: typeof obj.category === 'string' ? obj.category : undefined,
+		subscriptionPriceMinor,
+		perMinuteRateMinor,
 	};
 }
 
@@ -81,10 +99,34 @@ export interface UpdateMyProfileRequest {
 	bannerAssetId?: string;
 	bannerUrl?: string;
 	category?: string;
+	/** Monthly subscription price in minor units (integer). */
+	subscriptionPriceMinor?: number;
+	/** Timed-session rate per minute in minor units (integer). */
+	perMinuteRate?: number;
 }
 
 export interface UpdateMyProfileResponse {
 	user: User;
+}
+
+export interface NotificationSettings {
+	messages: boolean;
+	subscriptions: boolean;
+	tips: boolean;
+	likes: boolean;
+	system: boolean;
+}
+
+export interface GetMyNotificationSettingsResponse {
+	settings: NotificationSettings;
+}
+
+export interface PutMyNotificationSettingsRequest {
+	settings: Partial<NotificationSettings>;
+}
+
+export interface PutMyNotificationSettingsResponse {
+	settings: NotificationSettings;
 }
 
 export interface CreateReportRequest {
@@ -263,6 +305,12 @@ export const creatorsApi = {
 	me: {
 		updateProfile(body: UpdateMyProfileRequest): Promise<UpdateMyProfileResponse> {
 			return requestJson<UpdateMyProfileResponse>('/me/profile', { method: 'POST', body, auth: true });
+		},
+		getNotificationSettings(): Promise<GetMyNotificationSettingsResponse> {
+			return requestJson<GetMyNotificationSettingsResponse>('/me/notification-settings', { method: 'GET', auth: true });
+		},
+		putNotificationSettings(body: PutMyNotificationSettingsRequest): Promise<PutMyNotificationSettingsResponse> {
+			return requestJson<PutMyNotificationSettingsResponse>('/me/notification-settings', { method: 'PUT', body, auth: true });
 		},
 	},
 	payments: {

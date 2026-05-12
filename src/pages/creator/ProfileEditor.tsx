@@ -11,6 +11,7 @@ import { ApiError, creatorsApi } from '../../services/creatorsApi';
 import { uploadMediaAsset } from '../../services/mediaUpload';
 import { formatINR } from '../../services/razorpay';
 import { ProfileBannerMedia, UserAvatarMedia } from '../../components/ui/Avatar';
+import { inrRupeesToMinor } from '../../utils/money';
 
 export function ProfileEditor() {
 	const creator = useCurrentCreator();
@@ -70,18 +71,23 @@ export function ProfileEditor() {
 		const bannerPromise = bannerFile ? uploadMediaAsset('banner', bannerFile).then(r => r.assetId) : Promise.resolve(undefined);
 
 		void Promise.all([avatarPromise, bannerPromise])
-			.then(([avatarAssetId, bannerAssetId]) =>
-				creatorsApi.me.updateProfile({
+			.then(([avatarAssetId, bannerAssetId]) => {
+				const parsedPrice = Math.max(0, parseFloat(price) || 0);
+				const subscriptionPriceMinor = Number(inrRupeesToMinor(parsedPrice));
+				return creatorsApi.me.updateProfile({
 					name: name.trim() || undefined,
 					username: username.trim() || undefined,
 					bio: bio.trim() || undefined,
 					category: category?.trim() || undefined,
 					avatarAssetId,
 					bannerAssetId,
+					subscriptionPriceMinor: Number.isFinite(subscriptionPriceMinor) ? subscriptionPriceMinor : undefined,
 				})
-			)
+			})
 			.then(({ user }) => {
 				updateUser(user);
+				// Refresh GET /me so creatorDashboard (phase 4) stays in sync.
+				void creatorsApi.auth.me().then(r => { if (r.user) updateUser(r.user); }).catch(() => {});
 				void creatorWsUpsert(
 					username.trim() || creatorData.username,
 					name.trim() || creatorData.name,

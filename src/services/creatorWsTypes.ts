@@ -12,6 +12,10 @@ export interface CreatorProfileDTO extends CreatorSummaryDTO {
 	banner_url: string | null;
 	socials: Record<string, unknown> | null;
 	created_at: string;
+	/** Monthly subscription price in minor units (integer string) or null. */
+	subscription_price_minor?: string | null;
+	/** Timed-session rate in minor units per minute (integer number) or null. */
+	per_minute_rate?: number | null;
 	/** Optional extra fields present on some backends (used for follow UI). */
 	follower_count?: number | string | null;
 	is_followed?: boolean | null;

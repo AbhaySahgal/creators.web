@@ -52,6 +52,15 @@ function normalizeUserFromApi(payload: User): User {
 		typeof raw.id === 'number' ? String(raw.id) :
 		'';
 
+	const normalizeMinor = (v: unknown): string | undefined => {
+		if (typeof v === 'string') {
+			const t = v.trim();
+			return /^\d+$/.test(t) ? t : undefined;
+		}
+		if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return String(Math.floor(v));
+		return undefined;
+	};
+
 	let minor =
 		typeof raw.walletBalanceMinor === 'string' ? raw.walletBalanceMinor :
 		typeof raw.walletBalanceMinor === 'number' ? String(raw.walletBalanceMinor) :
@@ -66,10 +75,27 @@ function normalizeUserFromApi(payload: User): User {
 		}
 	}
 	if (!minor) minor = ZERO_MINOR;
+
+	const subscriptionPriceMinor =
+		normalizeMinor(raw.subscriptionPriceMinor) ??
+		normalizeMinor(raw.subscription_price_minor);
+
+	const perMinuteRateMinor =
+		normalizeMinor(raw.perMinuteRateMinor) ??
+		normalizeMinor(raw.per_minute_rate) ??
+		normalizeMinor(raw.perMinuteRateCents) ??
+		normalizeMinor(raw.perMinuteRate);
+
+	const creatorDashboard =
+		raw.creatorDashboard && typeof raw.creatorDashboard === 'object' ? raw.creatorDashboard as User['creatorDashboard'] : undefined;
+
 	return {
 		...payload,
 		id,
 		walletBalanceMinor: /^\d+$/.test(minor) ? minor : ZERO_MINOR,
+		subscriptionPriceMinor,
+		perMinuteRateMinor,
+		creatorDashboard,
 	};
 }
 

@@ -21,6 +21,8 @@ import { useSession } from '../../context/SessionContext';
 import { mockCreators } from '../../data/users';
 import { minimalCreatorFromUser } from '../../utils/creatorShell';
 import { formatINR } from '../../services/razorpay';
+import { formatINRFromMinor, inrRupeesToMinor } from '../../utils/money';
+import { creatorsApi } from '../../services/creatorsApi';
 
 function StatCard({ label, value, sub, icon, color, onClick }: {
 	label: string, value: string, sub?: string, icon: React.ReactNode, color: string, onClick?: () => void,
@@ -58,11 +60,12 @@ function formatDuration(secs: number): string {
 export function CreatorDashboard() {
 	const navigate = useNavigate();
 	const creator = useCurrentCreator();
-	const { state: authState } = useAuth();
+	const { state: authState, updateUser } = useAuth();
 	const { state: contentState, loadCreatorPosts } = useContent();
 	const { state: sessionState } = useSession();
 	const [editingRate, setEditingRate] = useState(false);
 	const [rateInput, setRateInput] = useState('');
+	const [rateSaving, setRateSaving] = useState(false);
 
 	const authedCreatorId = authState.user?.id ?? '';
 	const creatorData = creator ?? (authState.user?.role === 'creator' ?
@@ -80,7 +83,10 @@ export function CreatorDashboard() {
 	const creatorSessions = sessionState.sessionHistory.filter(s => s.creatorId === creatorUserIdForPosts);
 	const sessionEarnings = creatorSessions.reduce((sum, s) => sum + s.earnings, 0);
 
-	if (creatorData.kycStatus !== 'approved') {
+	const dashboard = authState.user?.creatorDashboard;
+	const kycStatus = dashboard?.kycStatus ?? creatorData.kycStatus;
+
+	if (kycStatus !== 'approved') {
 		return (
 			<Layout>
 				<div className="max-w-lg mx-auto px-4 py-12 text-center">
@@ -88,14 +94,14 @@ export function CreatorDashboard() {
 						<Star className="w-8 h-8 text-amber-400" />
 					</div>
 					<h2 className="text-xl font-bold text-foreground mb-2">
-						{creatorData.kycStatus === 'pending' ? 'KYC Verification Pending' :
-						creatorData.kycStatus === 'rejected' ? 'KYC Rejected' :
+						{kycStatus === 'pending' ? 'KYC Verification Pending' :
+						kycStatus === 'rejected' ? 'KYC Rejected' :
 						'Complete KYC Verification'}
 					</h2>
 					<p className="text-muted text-sm mb-6">
-						{creatorData.kycStatus === 'pending' ?
+						{kycStatus === 'pending' ?
 							'Your identity verification is being reviewed. This usually takes 1-2 business days.' :
-							creatorData.kycStatus === 'rejected' ?
+							kycStatus === 'rejected' ?
 								'Your KYC was rejected. Please resubmit with clearer documents.' :
 								'Verify your identity to start earning on creators.web.'}
 					</p>
@@ -104,16 +110,18 @@ export function CreatorDashboard() {
 						onClick={() => { void navigate('/creator-dashboard/kyc'); }}
 						className="bg-rose-500 hover:bg-rose-600 text-white font-semibold px-6 py-2.5 rounded-xl transition-all"
 					>
-						{creatorData.kycStatus === 'rejected' ? 'Resubmit KYC' : 'Submit KYC Documents'}
+						{kycStatus === 'rejected' ? 'Resubmit KYC' : 'Submit KYC Documents'}
 					</button>
 				</div>
 			</Layout>
 		);
 	}
 
-	const lastMonth = creatorData.monthlyStats[creatorData.monthlyStats.length - 2];
-	const thisMonth = creatorData.monthlyStats[creatorData.monthlyStats.length - 1];
-	const earningsGrowth = lastMonth ? ((thisMonth.earnings - lastMonth.earnings) / lastMonth.earnings * 100).toFixed(1) : 0;
+	const dashMonthly = dashboard?.monthlyStats ?? [];
+	const lastMonthCents = dashMonthly.length >= 2 ? Number(dashMonthly[dashMonthly.length - 2]?.earningsCents ?? 0) : 0;
+	const thisMonthCents = dashMonthly.length >= 1 ? Number(dashMonthly[dashMonthly.length - 1]?.earningsCents ?? 0) : 0;
+	const earningsGrowth =
+		lastMonthCents > 0 ? (((thisMonthCents - lastMonthCents) / lastMonthCents) * 100).toFixed(1) : 0;
 
 	return (
 		<Layout>
@@ -145,7 +153,7 @@ export function CreatorDashboard() {
 				<div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
 					<StatCard
 						label="Monthly Earnings"
-						value={formatINR(creatorData.monthlyEarnings)}
+						value={dashboard ? formatINRFromMinor(dashboard.monthlyEarningsCents) : formatINR(creatorData.monthlyEarnings)}
 						sub={`+${earningsGrowth}% vs last month`}
 						icon={<DollarSign className="w-5 h-5 text-emerald-400" />}
 						color="bg-emerald-500/15"
@@ -153,7 +161,7 @@ export function CreatorDashboard() {
 					/>
 					<StatCard
 						label="Subscribers"
-						value={creatorData.subscriberCount.toLocaleString()}
+						value={(dashboard ? dashboard.subscriberCount : creatorData.subscriberCount).toLocaleString()}
 						sub="Active this month"
 						icon={<Users className="w-5 h-5 text-blue-400" />}
 						color="bg-blue-500/15"
@@ -161,14 +169,14 @@ export function CreatorDashboard() {
 					/>
 					<StatCard
 						label="Session Earnings"
-						value={formatINR(sessionEarnings)}
-						sub={`${creatorSessions.length} sessions`}
+						value={dashboard ? formatINRFromMinor(dashboard.earningsBySource.sessionsCents) : formatINR(sessionEarnings)}
+						sub={`${dashboard ? dashboard.sessionHistory.length : creatorSessions.length} sessions`}
 						icon={<Zap className="w-5 h-5 text-amber-400" />}
 						color="bg-amber-500/15"
 					/>
 					<StatCard
 						label="Total Earnings"
-						value={formatINR(creatorData.totalEarnings)}
+						value={dashboard ? formatINRFromMinor(dashboard.totalEarningsCents) : formatINR(creatorData.totalEarnings)}
 						sub="All time"
 						icon={<TrendingUp className="w-5 h-5 text-rose-400" />}
 						color="bg-rose-500/15"
@@ -183,7 +191,13 @@ export function CreatorDashboard() {
 						</div>
 						{!editingRate ? (
 							<button
-								onClick={() => { setRateInput(creatorData.perMinuteRate.toFixed(2)); setEditingRate(true); }}
+								onClick={() => {
+									const rupees =
+										dashboard?.perMinuteRateCents != null ? dashboard.perMinuteRateCents / 100 :
+										creatorData.perMinuteRate;
+									setRateInput(rupees.toFixed(2));
+									setEditingRate(true);
+								}}
 								className="text-xs text-rose-400 hover:text-rose-300 font-semibold transition-colors"
 							>
 								Edit Rate
@@ -213,21 +227,43 @@ export function CreatorDashboard() {
 								<span className="text-muted text-xs">/min</span>
 							</div>
 							<button
-								onClick={() => setEditingRate(false)}
+								onClick={() => {
+									if (rateSaving) return;
+									const parsed = Math.max(0, parseFloat(rateInput) || 0);
+									const minor = Number(inrRupeesToMinor(parsed));
+									if (!Number.isFinite(minor) || minor < 0) { setEditingRate(false); return; }
+									setRateSaving(true);
+									void creatorsApi.me.updateProfile({ perMinuteRate: minor })
+										.then(() => creatorsApi.auth.me())
+										.then(r => { if (r.user) updateUser(r.user); })
+										.catch(() => {})
+										.finally(() => { setRateSaving(false); setEditingRate(false); });
+								}}
 								className="bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-all"
 							>
-								Save
+								{rateSaving ? 'Saving…' : 'Save'}
 							</button>
 						</div>
 					) : (
 						<div className="flex items-center gap-3">
-							<div className="text-3xl font-black text-foreground">{formatINR(creatorData.perMinuteRate)}</div>
+							<div className="text-3xl font-black text-foreground">
+								{dashboard?.perMinuteRateCents != null ? formatINRFromMinor(String(dashboard.perMinuteRateCents)) : formatINR(creatorData.perMinuteRate)}
+							</div>
 							<span className="text-muted/80 text-sm">/minute</span>
 							<div className="ml-auto flex flex-col items-end gap-1">
 								{[5, 10, 15].map(m => (
 									<div key={m} className="flex items-center gap-2 text-xs text-muted/80">
 										<Clock className="w-3 h-3" />
-										{m}min = <span className="text-foreground/80 font-semibold">{formatINR(m * creatorData.perMinuteRate)}</span>
+										{(() => {
+											const rupeesPerMin =
+												dashboard?.perMinuteRateCents != null ? dashboard.perMinuteRateCents / 100 :
+												creatorData.perMinuteRate;
+											return (
+												<>
+													{m}min = <span className="text-foreground/80 font-semibold">{formatINR(m * rupeesPerMin)}</span>
+												</>
+											);
+										})()}
 									</div>
 								))}
 							</div>
@@ -242,9 +278,9 @@ export function CreatorDashboard() {
 							<TrendingUp className="w-4 h-4 text-rose-400" />
 						</div>
 						<div className="flex items-end gap-1.5 h-24">
-							{creatorData.monthlyStats.map((stat, i) => {
-								const max = Math.max(...creatorData.monthlyStats.map(s => s.earnings));
-								const pct = (stat.earnings / max) * 100;
+							{(dashboard ? dashboard.monthlyStats.map(s => ({ month: s.month, earningsMinor: s.earningsCents })) : creatorData.monthlyStats.map(s => ({ month: s.month, earningsMinor: String(Math.round(s.earnings * 100)) }))).map((stat, i, arr) => {
+								const max = Math.max(1, ...arr.map(s => Number(s.earningsMinor) || 0));
+								const pct = ((Number(stat.earningsMinor) || 0) / max) * 100;
 								return (
 									<div key={i} className="flex-1 flex flex-col items-center gap-1">
 										<div
@@ -262,28 +298,31 @@ export function CreatorDashboard() {
 						<div className="flex items-center justify-between mb-3">
 							<h3 className="text-sm font-semibold text-foreground">Recent Sessions</h3>
 						</div>
-						{creatorSessions.length === 0 ? (
+						{(dashboard ? dashboard.sessionHistory : creatorSessions).length === 0 ? (
 							<div className="flex flex-col items-center justify-center py-4">
 								<p className="text-xs text-muted">No sessions yet</p>
 							</div>
 						) : (
 							<div className="space-y-2.5">
-								{creatorSessions.slice(0, 4).map(sess => {
-									const typeInfo = formatSessionType(sess.type);
+								{(dashboard ? dashboard.sessionHistory : creatorSessions).slice(0, 4).map((sess: any) => {
+									const typeRaw = dashboard ? (sess.type === 'call' ? 'audio' : 'chat') : sess.type;
+									const typeInfo = formatSessionType(typeRaw);
 									const Icon = typeInfo.icon;
 									return (
-										<div key={sess.id} className="flex items-center gap-2.5">
+										<div key={dashboard ? sess.requestId : sess.id} className="flex items-center gap-2.5">
 											<div className="w-9 h-9 rounded-xl bg-foreground/5 flex items-center justify-center shrink-0">
 												<Icon className={`w-4 h-4 ${typeInfo.color}`} />
 											</div>
 											<div className="flex-1 min-w-0">
 												<p className="text-xs text-foreground/80 font-medium truncate">{sess.fanName}</p>
 												<p className="text-[10px] text-muted/80">
-													{typeInfo.label} · {sess.durationMinutes}min
-													{sess.actualDurationSeconds && ` · ${formatDuration(sess.actualDurationSeconds)}`}
+													{typeInfo.label} · {dashboard ? (sess.durationMinutes ?? 0) : sess.durationMinutes}min
+													{!dashboard && sess.actualDurationSeconds && ` · ${formatDuration(sess.actualDurationSeconds)}`}
 												</p>
 											</div>
-											<span className="text-xs font-bold text-emerald-400">+{formatINR(sess.earnings)}</span>
+											<span className="text-xs font-bold text-emerald-400">
+												+{dashboard ? formatINRFromMinor(sess.earningsCents) : formatINR(sess.earnings)}
+											</span>
 										</div>
 									);
 								})}

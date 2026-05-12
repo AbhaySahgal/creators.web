@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { User, Bell, Shield, LogOut, Eye, EyeOff, Save, Camera } from '../components/icons';
 import { useNavigate } from 'react-router-dom';
 import { Layout } from '../components/layout/Layout';
@@ -32,6 +32,44 @@ export function Settings() {
 		likes: true,
 		system: true,
 	});
+	const [notifLoading, setNotifLoading] = useState(false);
+	const [notifSaving, setNotifSaving] = useState(false);
+
+	useEffect(() => {
+		if (!user) return;
+		setNotifLoading(true);
+		void creatorsApi.me.getNotificationSettings()
+			.then(r => {
+				if (!r?.settings) return;
+				setNotifPrefs({
+					messages: Boolean(r.settings.messages),
+					subscriptions: Boolean(r.settings.subscriptions),
+					tips: Boolean(r.settings.tips),
+					likes: Boolean(r.settings.likes),
+					system: Boolean(r.settings.system),
+				});
+			})
+			.catch(() => {})
+			.finally(() => setNotifLoading(false));
+	}, [user?.id]);
+
+	function handleSaveNotifPrefs() {
+		if (notifSaving) return;
+		setNotifSaving(true);
+		void creatorsApi.me.putNotificationSettings({ settings: notifPrefs })
+			.then(r => {
+				if (r?.settings) setNotifPrefs(r.settings);
+				showToast('Notification settings saved!');
+			})
+			.catch(err => {
+				const msg =
+					err instanceof ApiError ? `Save failed (HTTP ${err.status}).` :
+					err instanceof Error ? err.message :
+					'Save failed.';
+				showToast(msg, 'error');
+			})
+			.finally(() => setNotifSaving(false));
+	}
 
 	function handleSaveProfile() {
 		setIsSaving(true);
@@ -218,6 +256,9 @@ export function Settings() {
 						<Bell className="w-4 h-4 text-rose-400" />
 						<h2 className="font-semibold text-foreground">Notifications</h2>
 					</div>
+					<p className="text-xs text-muted mb-3">
+						Follow/unfollow in-app alerts are controlled by <span className="font-semibold">likes</span> (per backend spec).
+					</p>
 					<div className="space-y-3">
 						{(Object.keys(notifPrefs) as (keyof typeof notifPrefs)[]).map(key => (
 							<div key={key} className="flex items-center justify-between">
@@ -244,6 +285,18 @@ export function Settings() {
 								</label>
 							</div>
 						))}
+					</div>
+					<div className="mt-4 flex items-center justify-between gap-3">
+						<p className="text-xs text-muted">{notifLoading ? 'Loading…' : ' '}</p>
+						<Button
+							variant="primary"
+							size="sm"
+							onClick={() => { handleSaveNotifPrefs(); }}
+							isLoading={notifSaving}
+							leftIcon={<Save className="w-3.5 h-3.5" />}
+						>
+							Save
+						</Button>
 					</div>
 				</section>
 

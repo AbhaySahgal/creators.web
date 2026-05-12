@@ -22,6 +22,7 @@ import { useSubscriptions } from '../../context/SubscriptionContext';
 import { subscriptionId, subscriptionUiStatus } from '../../services/subscriptionUi';
 import { ProfileBannerMedia, UserAvatarMedia } from '../../components/ui/Avatar';
 import { minimalCreatorFromDisplay } from '../../utils/creatorShell';
+import { formatINRFromMinor } from '../../utils/money';
 
 export function CreatorProfile() {
 	const { id: creatorUserId } = useParams<{ id: string }>();
@@ -139,6 +140,7 @@ export function CreatorProfile() {
 	const subDto = getSubscriptionForCreator(creator.id);
 	const subStatus = subDto ? subscriptionUiStatus(subDto) : null;
 	const subscribed = subStatus === 'active' || isSubscribed(creator.id);
+	const isRenewable = subStatus === 'cancelled' || subStatus === 'expired';
 	const subId = subDto ? subscriptionId(subDto) : null;
 	const isOwner = authState.user?.id === creator.id;
 	const creatorForDisplay: Creator = isOwner && authState.user ? {
@@ -150,6 +152,10 @@ export function CreatorProfile() {
 		banner: authState.user.banner ?? creator.banner,
 		category: authState.user.category ?? creator.category,
 	} : creator;
+
+	const subscriptionPriceLabel = creatorForDisplay.subscriptionPriceMinor ?
+		formatINRFromMinor(creatorForDisplay.subscriptionPriceMinor) :
+		formatINR(creatorForDisplay.subscriptionPrice);
 
 	const creatorPosts = contentState.posts
 		.filter(p => p.creatorId === creatorForDisplay.id)
@@ -350,7 +356,7 @@ export function CreatorProfile() {
 										onClick={() => setShowSubscribeModal(true)}
 										className="bg-rose-500 hover:bg-rose-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all active:scale-95 shadow-lg shadow-rose-500/25"
 									>
-										Subscribe {formatINR(creatorForDisplay.subscriptionPrice)}/mo
+										{isRenewable ? 'Renew' : 'Subscribe'} {subscriptionPriceLabel}/mo
 									</button>
 								)}
 
@@ -417,13 +423,13 @@ export function CreatorProfile() {
 								</div>
 								<div className="flex-1">
 									<p className="text-sm font-semibold text-foreground dark:text-white mb-0.5">Subscribe to unlock all content</p>
-									<p className="text-xs text-muted dark:text-white/40">{creatorForDisplay.postCount} posts · Starting at {formatINR(creatorForDisplay.subscriptionPrice)}/mo</p>
+									<p className="text-xs text-muted dark:text-white/40">{creatorForDisplay.postCount} posts · Starting at {subscriptionPriceLabel}/mo</p>
 								</div>
 								<button
 									onClick={() => setShowSubscribeModal(true)}
 									className="bg-rose-500 hover:bg-rose-600 text-white text-sm font-bold px-3 py-1.5 rounded-xl transition-all"
 								>
-									Subscribe
+									{isRenewable ? 'Renew' : 'Subscribe'}
 								</button>
 							</div>
 						</div>

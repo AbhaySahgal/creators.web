@@ -5,8 +5,7 @@ import { Button } from '../ui/Button';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useSubscriptions } from '../../context/SubscriptionContext';
-import { formatINR } from '../../services/razorpay';
-import { compareMinor, formatINRFromMinor, inrRupeesToMinor } from '../../utils/money';
+import { compareMinor, formatINRFromMinor, inrRupeesToMinor, parseMinor } from '../../utils/money';
 import type { Creator } from '../../types';
 import { delayMs } from '../../utils/delay';
 import { UserAvatarMedia } from '../ui/Avatar';
@@ -36,9 +35,18 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 	const [error, setError] = useState('');
 
 	const balanceMinor = authState.user?.walletBalanceMinor ?? '0';
-	const inrPrice = creator.subscriptionPrice;
-	const subMinor = inrRupeesToMinor(creator.subscriptionPrice);
+	const creatorMinor =
+		typeof creator.subscriptionPriceMinor === 'string' && /^\d+$/.test(creator.subscriptionPriceMinor.trim()) ?
+			creator.subscriptionPriceMinor.trim() :
+			null;
+	// Spec: if missing/empty/non-positive server uses default (999 minor). UI must not treat null as free.
+	const chargeMinor =
+		creatorMinor && Number(creatorMinor) > 0 ? creatorMinor :
+		inrRupeesToMinor(creator.subscriptionPrice);
+	const subMinor = chargeMinor;
 	const canAffordWallet = compareMinor(balanceMinor, '>=', subMinor);
+	const displayPrice = formatINRFromMinor(chargeMinor);
+	const amountInrForCheckout = Number(parseMinor(chargeMinor)) / 100;
 
 	function completeSubscription() {
 		setSuccess(true);
@@ -53,7 +61,7 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 			setError('');
 
 			if (payMode === 'external') {
-				void subscribeViaCheckout(creator.id, creator.subscriptionPrice).then(result => {
+				void subscribeViaCheckout(creator.id, amountInrForCheckout).then(result => {
 					if (result.ok) {
 						completeSubscription();
 					} else if (!result.cancelled) {
@@ -107,7 +115,7 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 								<p className="text-xs text-muted">@{creator.username}</p>
 							</div>
 							<div className="text-right">
-								<p className="text-lg font-bold text-rose-400">{formatINR(inrPrice)}</p>
+						<p className="text-lg font-bold text-rose-400">{displayPrice}</p>
 								<p className="text-xs text-muted">per month</p>
 							</div>
 						</div>
@@ -129,7 +137,7 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 									payMode === 'external' ? 'border-rose-500/40 bg-rose-500/10 text-rose-500' : 'border-border/20 bg-foreground/5 text-muted hover:bg-foreground/10'
 								}`}
 							>
-								Pay {formatINR(inrPrice)}
+								Pay {displayPrice}
 							</button>
 							<button
 								onClick={() => setPayMode('wallet')}
@@ -155,7 +163,7 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 							onClick={() => { void handleSubscribe(); }}
 							disabled={payMode === 'wallet' && !canAffordWallet}
 						>
-							Subscribe for {formatINR(creator.subscriptionPrice)}/month
+							Subscribe for {displayPrice}/month
 						</Button>
 						{payMode === 'wallet' && !canAffordWallet && (
 							<p className="text-center text-xs text-rose-400 mt-2">

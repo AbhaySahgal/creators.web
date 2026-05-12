@@ -22,6 +22,22 @@ export function subscriptionId(dto: SubscriptionDTO): string | null {
 	return toStringId(dto.id ?? dto.subscription_id ?? dto.subscriptionId);
 }
 
+export function subscriptionAutoRenew(dto: SubscriptionDTO): boolean | null {
+	const v =
+		typeof dto.auto_renew === 'boolean' ? dto.auto_renew :
+		typeof dto.autoRenew === 'boolean' ? dto.autoRenew :
+		null;
+	return v;
+}
+
+export function subscriptionEndsAt(dto: SubscriptionDTO): string | null {
+	const v =
+		typeof dto.ends_at === 'string' ? dto.ends_at :
+		typeof dto.endsAt === 'string' ? dto.endsAt :
+		null;
+	return v && v.trim() ? v : null;
+}
+
 export function subscriptionUiStatus(dto: SubscriptionDTO): SubscriptionUiStatus {
 	const isActive =
 		typeof dto.is_active === 'boolean' ? dto.is_active :
@@ -38,6 +54,8 @@ export function subscriptionUiStatus(dto: SubscriptionDTO): SubscriptionUiStatus
 
 export function subscriptionAmountMinor(dto: SubscriptionDTO): string | null {
 	const v =
+		typeof dto.price_cents === 'number' ? String(dto.price_cents) :
+		typeof dto.price_cents === 'string' ? dto.price_cents :
 		typeof dto.amount_cents === 'string' ? dto.amount_cents :
 		typeof dto.amount_minor === 'string' ? dto.amount_minor :
 		typeof dto.amountMinor === 'number' ? String(dto.amountMinor) :

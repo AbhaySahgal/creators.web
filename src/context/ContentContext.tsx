@@ -635,6 +635,22 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 		};
 	}, [ws, wsConnected, handlePush]);
 
+	// Creator follow/unfollow push events: keep following list in sync.
+	useEffect(() => {
+		if (!wsConnected) return;
+		const myId = authState.user?.id;
+		if (!myId) return;
+		const onFollowEvent = (data: unknown) => {
+			const p = (data && typeof data === 'object' ? data : null) as { follower_user_id?: unknown } | null;
+			const followerId = p?.follower_user_id == null ? '' : String(p.follower_user_id);
+			if (followerId !== myId) return;
+			void refreshFollowing().catch(() => {});
+		};
+		const offFollowed = ws.on('creator', 'followed', onFollowEvent);
+		const offUnfollowed = ws.on('creator', 'unfollowed', onFollowEvent);
+		return () => { offFollowed(); offUnfollowed(); };
+	}, [ws, wsConnected, authState.user?.id, refreshFollowing]);
+
 	useEffect(() => {
 		const u = authState.user;
 		if (!u || !wsConnected || !wsAuthReady) {

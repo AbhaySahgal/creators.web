@@ -12,7 +12,7 @@ import { formatINRFromMinor } from '../../utils/money';
 import type { RazorpayOrderRow } from '../../services/paymentWs';
 import { useSubscriptions } from '../../context/SubscriptionContext';
 import { useContent } from '../../context/ContentContext';
-import { subscriptionAmountMinor, subscriptionId, subscriptionUiStatus } from '../../services/subscriptionUi';
+import { subscriptionAmountMinor, subscriptionAutoRenew, subscriptionEndsAt, subscriptionId, subscriptionUiStatus } from '../../services/subscriptionUi';
 import { UserAvatarMedia } from '../../components/ui/Avatar';
 
 const ADD_FUND_PRESETS_INR = [100, 250, 500, 1000, 2000, 5000];
@@ -122,7 +122,7 @@ export function Wallet() {
 		refreshWalletData,
 		state: walletState,
 	} = useWallet();
-	const { byCreatorUserId, cancel: cancelWsSubscription, loading: subsLoading, error: subsError } = useSubscriptions();
+	const { byCreatorUserId, cancel: cancelWsSubscription, subscribeWallet, toggleAutoRenew, loading: subsLoading, error: subsError } = useSubscriptions();
 	const { creatorWsGetByUserId } = useContent();
 	const [showAddFunds, setShowAddFunds] = useState(false);
 	const [addAmount, setAddAmount] = useState(500);
@@ -147,6 +147,8 @@ export function Wallet() {
 		status: 'active' | 'cancelled' | 'expired',
 		subscriptionId: string | null,
 		amountMinor: string | null,
+		autoRenew: boolean | null,
+		endsAt: string | null,
 	};
 
 	const subs = useMemo<WalletSubRow[]>(() => {
@@ -159,6 +161,8 @@ export function Wallet() {
 					status: subscriptionUiStatus(dto),
 					subscriptionId: subscriptionId(dto),
 					amountMinor: subscriptionAmountMinor(dto),
+					autoRenew: subscriptionAutoRenew(dto),
+					endsAt: subscriptionEndsAt(dto),
 				});
 			}
 		}
@@ -390,6 +394,15 @@ export function Wallet() {
 															<span className="text-sm font-bold text-rose-400">{s.amountMinor ? `${formatINRFromMinor(s.amountMinor)}/mo` : '—'}</span>
 														</div>
 														<div className="flex gap-2">
+															{s.subscriptionId && s.autoRenew != null && (
+																<button
+																	type="button"
+																	onClick={() => { void toggleAutoRenew(s.subscriptionId!); }}
+																	className="flex-1 text-xs py-1.5 rounded-xl font-medium border border-border/20 bg-foreground/5 text-foreground/80 hover:bg-foreground/10 transition-colors"
+																>
+																	Auto-renew: {s.autoRenew ? 'On' : 'Off'}
+																</button>
+															)}
 															<button
 																disabled={!s.subscriptionId}
 																onClick={() => {
@@ -439,6 +452,15 @@ export function Wallet() {
 															</div>
 															<span className="text-xs px-2 py-1 rounded-full bg-foreground/5 text-muted">Cancelled</span>
 														</div>
+														<div className="mt-3 flex gap-2">
+															<button
+																type="button"
+																onClick={() => { void subscribeWallet(s.creatorUserId, true); }}
+																className="flex-1 text-xs py-1.5 rounded-xl font-medium border border-emerald-500/20 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+															>
+																Renew
+															</button>
+														</div>
 													</div>
 												);
 											})}
@@ -476,6 +498,15 @@ export function Wallet() {
 																<p className="text-xs text-muted">Expired</p>
 															</div>
 															<span className="text-xs px-2 py-1 rounded-full bg-foreground/5 text-muted">Expired</span>
+														</div>
+														<div className="mt-3 flex gap-2">
+															<button
+																type="button"
+																onClick={() => { void subscribeWallet(s.creatorUserId, true); }}
+																className="flex-1 text-xs py-1.5 rounded-xl font-medium border border-emerald-500/20 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+															>
+																Renew
+															</button>
 														</div>
 													</div>
 												);

@@ -108,12 +108,48 @@ export interface User {
 	bio?: string;
 	banner?: string;
 	category?: string;
+	/** Creator monthly subscription price in minor units (integer string). */
+	subscriptionPriceMinor?: string;
+	/** Creator timed session rate per minute in minor units. */
+	perMinuteRateMinor?: string;
+	/** Creator dashboard payload returned on GET /me (for creators/admins with creator profile). */
+	creatorDashboard?: CreatorDashboard;
 	role: UserRole;
 	createdAt: string;
 	isAgeVerified: boolean;
 	status: AccountStatus;
 	/** INR paise as decimal string (API `balance_cents` / `amount_cents` scale). */
 	walletBalanceMinor: string;
+}
+
+export interface CreatorDashboardSessionRow {
+	requestId: string;
+	type: 'chat' | 'call';
+	status: string;
+	fanUserId: string;
+	fanName: string;
+	durationMinutes: number | null;
+	earningsCents: string;
+	actualDurationSeconds: null;
+	createdAt: string;
+	completedAt: string | null;
+}
+
+export interface CreatorDashboard {
+	kycStatus: 'not_submitted' | 'pending' | 'approved' | 'rejected';
+	followerCount: number;
+	subscriberCount: number;
+	totalEarningsCents: string;
+	monthlyEarningsCents: string;
+	tipsReceivedCents: string;
+	earningsBySource: {
+		subscriptionsCents: string;
+		tipsCents: string;
+		sessionsCents: string;
+	};
+	monthlyStats: { month: string; earningsCents: string }[];
+	sessionHistory: CreatorDashboardSessionRow[];
+	perMinuteRateCents: number | null;
 }
 
 export interface Creator extends User {
