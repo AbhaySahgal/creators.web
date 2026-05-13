@@ -139,10 +139,10 @@ export function Navbar() {
 							onClick={() => { void navigate('/admin/moderation'); }}
 						/>
 						<NavLink
-							label="reports"
-							path="/admin/reports"
+							label="Analytics"
+							path="/admin/analytics"
 							current={location.pathname}
-							onClick={() => { void navigate('/admin/reports'); }}
+							onClick={() => { void navigate('/admin/analytics'); }}
 						/>
 					</div>
 				)}

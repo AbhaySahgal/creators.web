@@ -1,40 +1,121 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle, XCircle, Eye, Clock, Shield } from '../../components/icons';
 import { Navbar } from '../../components/layout/Navbar';
 import { ToastContainer, Modal } from '../../components/ui/Toast';
 import { Button } from '../../components/ui/Button';
 import { useNotifications } from '../../context/NotificationContext';
-import { mockKYCApplications } from '../../data/transactions';
-import type { KYCApplication } from '../../types';
+import { useEnsureWsAuth, useWs, useWsAuthReady, useWsConnected } from '../../context/WsContext';
+import { adminApproveKyc, adminListKyc, adminRejectKyc } from '../../services/adminWs';
+import type { AdminKycListItem } from '../../services/adminWsTypes';
+import type { KYCApplication, KYCStatus } from '../../types';
 import { formatDate } from '../../utils/date';
+import { humanizeWsBackendError } from '../../utils/wsBackendError';
+
+function itemToApplication(item: AdminKycListItem): KYCApplication {
+	const id = String(item.applicationId ?? item.id ?? '');
+	const statusRaw = item.status;
+	const status: KYCStatus =
+		statusRaw === 'pending' || statusRaw === 'approved' || statusRaw === 'rejected' || statusRaw === 'not_submitted' ?
+			statusRaw :
+			'pending';
+	return {
+		id,
+		creatorId: String(item.creatorId ?? ''),
+		creatorName: String(item.creatorName ?? 'Unknown'),
+		creatorEmail: String(item.creatorEmail ?? ''),
+		creatorAvatar: String(item.creatorAvatar ?? ''),
+		submittedAt: String(item.submittedAt ?? ''),
+		status,
+		idFrontUrl: String(item.idFrontUrl ?? ''),
+		idBackUrl: String(item.idBackUrl ?? ''),
+		selfieUrl: String(item.selfieUrl ?? ''),
+		rejectionReason: typeof item.rejectionReason === 'string' ? item.rejectionReason : undefined,
+	};
+}
 
 export function CreatorApproval() {
 	const { showToast } = useNotifications();
-	const [applications, setApplications] = useState<KYCApplication[]>(mockKYCApplications);
+	const ws = useWs();
+	const wsConnected = useWsConnected();
+	const wsAuthReady = useWsAuthReady();
+	const ensureWsAuth = useEnsureWsAuth();
+
+	const [applications, setApplications] = useState<KYCApplication[]>([]);
+	const [pendingCount, setPendingCount] = useState<number | null>(null);
+	const [nextCursor, setNextCursor] = useState<string | null>(null);
+	const [loading, setLoading] = useState(true);
+	const [loadingMore, setLoadingMore] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
 	const [selectedApp, setSelectedApp] = useState<KYCApplication | null>(null);
 	const [rejectReason, setRejectReason] = useState('');
 	const [showRejectModal, setShowRejectModal] = useState(false);
-	const [activeTab, setActiveTab] = useState<'pending' | 'all'>('pending');
+	const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
 
-	const displayed = activeTab === 'pending' ?
-		applications.filter(a => a.status === 'pending') :
-		applications;
+	const load = useCallback(async (cursor: string | null, append: boolean) => {
+		if (!wsConnected) {
+			setError('Not connected');
+			setLoading(false);
+			return;
+		}
+		try {
+			await ensureWsAuth();
+			if (append) setLoadingMore(true);
+			else setLoading(true);
+			setError(null);
+			const res = await adminListKyc(ws, filter, 30, cursor);
+			const mapped = res.items.map(itemToApplication);
+			setApplications(prev => append ? [...prev, ...mapped] : mapped);
+			setNextCursor(res.nextCursor ?? null);
+			if (typeof res.pendingCount === 'number') setPendingCount(res.pendingCount);
+		} catch (e) {
+			const msg = humanizeWsBackendError(e instanceof Error ? e.message : 'Failed to load KYC');
+			setError(msg);
+			showToast(msg, 'error');
+			if (!append) setApplications([]);
+		} finally {
+			setLoading(false);
+			setLoadingMore(false);
+		}
+	}, [ensureWsAuth, filter, showToast, ws, wsConnected]);
 
-	function handleApprove(id: string) {
-		setApplications(prev => prev.map(a => a.id === id ? { ...a, status: 'approved' } : a));
-		showToast('Creator approved successfully!');
-		setSelectedApp(null);
+	useEffect(() => {
+		if (!wsAuthReady && wsConnected) return;
+		if (!wsConnected) {
+			setLoading(false);
+			setError('WebSocket disconnected');
+			return;
+		}
+		void load(null, false);
+	}, [filter, load, wsAuthReady, wsConnected]);
+
+	async function handleApprove(id: string) {
+		try {
+			await ensureWsAuth();
+			await adminApproveKyc(ws, id);
+			showToast('Creator approved successfully!');
+			setSelectedApp(null);
+			void load(null, false);
+		} catch (e) {
+			const msg = humanizeWsBackendError(e instanceof Error ? e.message : 'Approve failed');
+			showToast(msg, 'error');
+		}
 	}
 
-	function handleReject() {
+	async function handleReject() {
 		if (!selectedApp || !rejectReason.trim()) { showToast('Please provide a rejection reason', 'error'); return; }
-		setApplications(prev => prev.map(a =>
-			a.id === selectedApp.id ? { ...a, status: 'rejected', rejectionReason: rejectReason } : a
-		));
-		showToast('Creator application rejected');
-		setShowRejectModal(false);
-		setSelectedApp(null);
-		setRejectReason('');
+		try {
+			await ensureWsAuth();
+			await adminRejectKyc(ws, selectedApp.id, rejectReason.trim());
+			showToast('Creator application rejected');
+			setShowRejectModal(false);
+			setSelectedApp(null);
+			setRejectReason('');
+			void load(null, false);
+		} catch (e) {
+			const msg = humanizeWsBackendError(e instanceof Error ? e.message : 'Reject failed');
+			showToast(msg, 'error');
+		}
 	}
 
 	const statusColors = {
@@ -43,6 +124,9 @@ export function CreatorApproval() {
 		rejected: 'bg-rose-500/20 text-rose-400',
 		not_submitted: 'bg-foreground/10 text-muted',
 	};
+
+	const pendingLabel =
+		filter === 'pending' && pendingCount != null ? `pending (${pendingCount})` : 'pending';
 
 	return (
 		<div className="min-h-screen bg-background text-foreground">
@@ -54,28 +138,39 @@ export function CreatorApproval() {
 					<h1 className="text-xl font-bold text-foreground">KYC Applications</h1>
 				</div>
 
-				<div className="flex gap-1 bg-foreground/5 p-0.5 rounded-xl mb-4 w-fit">
-					{(['pending', 'all'] as const).map(tab => (
+				{error && !loading && (
+					<div className="mb-4 text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-4 py-3">
+						{error}
+					</div>
+				)}
+
+				<div className="flex flex-wrap gap-1 bg-foreground/5 p-0.5 rounded-xl mb-4 w-fit">
+					{(['pending', 'approved', 'rejected', 'all'] as const).map(tab => (
 						<button
 							key={tab}
-							onClick={() => setActiveTab(tab)}
+							type="button"
+							onClick={() => setFilter(tab)}
 							className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all capitalize ${
-								activeTab === tab ? 'bg-foreground/10 text-foreground' : 'text-muted'
+								filter === tab ? 'bg-foreground/10 text-foreground' : 'text-muted'
 							}`}
 						>
-							{tab} {tab === 'pending' && `(${applications.filter(a => a.status === 'pending').length})`}
+							{tab === 'pending' ? pendingLabel : tab}
 						</button>
 					))}
 				</div>
 
 				<div className="space-y-3">
-					{displayed.length === 0 ? (
+					{loading && applications.length === 0 ? (
+						<div className="text-center py-10 bg-surface border border-border/20 rounded-2xl text-muted text-sm">
+							Loading applications…
+						</div>
+					) : applications.length === 0 ? (
 						<div className="text-center py-10 bg-surface border border-border/20 rounded-2xl">
 							<Clock className="w-8 h-8 text-muted/50 mx-auto mb-2" />
-							<p className="text-muted text-sm">No pending applications</p>
+							<p className="text-muted text-sm">No applications in this category</p>
 						</div>
 					) : (
-						displayed.map(app => (
+						applications.map(app => (
 							<div key={app.id} className="bg-surface border border-border/20 rounded-2xl p-4">
 								<div className="flex items-start gap-4">
 									<img src={app.creatorAvatar} alt={app.creatorName} className="w-12 h-12 rounded-xl object-cover shrink-0" />
@@ -84,7 +179,7 @@ export function CreatorApproval() {
 											<div>
 												<p className="font-semibold text-foreground">{app.creatorName}</p>
 												<p className="text-xs text-muted">{app.creatorEmail}</p>
-												<p className="text-xs text-muted/80 mt-0.5">Submitted {formatDate(app.submittedAt)}</p>
+												<p className="text-xs text-muted/80 mt-0.5">Submitted {app.submittedAt ? formatDate(app.submittedAt) : '—'}</p>
 											</div>
 											<span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusColors[app.status]}`}>
 												{app.status}
@@ -100,18 +195,21 @@ export function CreatorApproval() {
 								{app.status === 'pending' && (
 									<div className="flex gap-2 mt-3">
 										<button
+											type="button"
 											onClick={() => setSelectedApp(app)}
 											className="flex-1 flex items-center justify-center gap-1.5 bg-foreground/5 hover:bg-foreground/10 text-muted hover:text-foreground text-sm py-2 rounded-xl transition-colors"
 										>
 											<Eye className="w-4 h-4" /> Review
 										</button>
 										<button
-											onClick={() => handleApprove(app.id)}
+											type="button"
+											onClick={() => void handleApprove(app.id)}
 											className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-sm py-2 rounded-xl transition-colors"
 										>
 											<CheckCircle className="w-4 h-4" /> Approve
 										</button>
 										<button
+											type="button"
 											onClick={() => { setSelectedApp(app); setShowRejectModal(true); }}
 											className="flex-1 flex items-center justify-center gap-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 text-sm py-2 rounded-xl transition-colors"
 										>
@@ -123,6 +221,19 @@ export function CreatorApproval() {
 						))
 					)}
 				</div>
+
+				{nextCursor && (
+					<div className="mt-4 flex justify-center">
+						<button
+							type="button"
+							disabled={loadingMore}
+							onClick={() => void load(nextCursor, true)}
+							className="px-4 py-2 text-sm font-medium rounded-xl bg-foreground/10 text-foreground hover:bg-foreground/15 disabled:opacity-50"
+						>
+							{loadingMore ? 'Loading…' : 'Load more'}
+						</button>
+					</div>
+				)}
 			</div>
 
 			{selectedApp && !showRejectModal && (
@@ -143,12 +254,16 @@ export function CreatorApproval() {
 							].map(({ label, url }) => (
 								<div key={label}>
 									<p className="text-xs text-muted mb-1">{label}</p>
-									<img src={url} alt={label} className="w-full h-24 object-cover rounded-xl" />
+									{url ? (
+										<img src={url} alt={label} className="w-full h-24 object-cover rounded-xl" decoding="async" />
+									) : (
+										<div className="w-full h-24 rounded-xl bg-foreground/5 flex items-center justify-center text-[10px] text-muted">No image</div>
+									)}
 								</div>
 							))}
 						</div>
 						<div className="flex gap-2">
-							<Button variant="primary" fullWidth onClick={() => handleApprove(selectedApp.id)}>
+							<Button variant="primary" fullWidth onClick={() => void handleApprove(selectedApp.id)}>
 								<CheckCircle className="w-4 h-4" /> Approve
 							</Button>
 							<Button variant="danger" fullWidth onClick={() => setShowRejectModal(true)}>
@@ -169,7 +284,7 @@ export function CreatorApproval() {
 						rows={3}
 						className="w-full bg-input border border-border/20 rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring/40 resize-none mb-3"
 					/>
-					<Button variant="danger" fullWidth onClick={handleReject}>
+					<Button variant="danger" fullWidth onClick={() => void handleReject()}>
 						Confirm Rejection
 					</Button>
 				</div>

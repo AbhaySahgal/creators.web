@@ -211,14 +211,21 @@ export class WsClient {
 					this.pendingOrder = this.pendingOrder.filter(id => id !== frame.requestId);
 					pending.reject(new Error(frame.message));
 				} else {
-					// Some backend errors do not include a request id (often `-`) when the service/command
-					// fails before the router binds a request. Best-effort: attribute to most recent request.
-					const rid = this.pendingOrder[this.pendingOrder.length - 1];
-					const last = rid ? this.pending[rid] : undefined;
-					if (rid && last && (frame.requestId === '-' || frame.requestId.trim() === '')) {
-						delete this.pending[rid];
-						this.pendingOrder = this.pendingOrder.filter(id => id !== rid);
-						last.reject(new Error(frame.message));
+					// Duplicate / late error after success already resolved this rid — ignore to avoid stray rejects.
+					if (/^req\d+$/i.test(frame.requestId.trim())) {
+						if (import.meta.env.DEV) {
+							console.warn('[WS] Orphan error (no pending request):', frame.requestId, frame.message);
+						}
+					} else if (frame.requestId === '-' || frame.requestId.trim() === '') {
+						// Some backend errors do not include a request id when the service/command
+						// fails before the router binds a request. Best-effort: attribute to most recent request.
+						const rid = this.pendingOrder[this.pendingOrder.length - 1];
+						const last = rid ? this.pending[rid] : undefined;
+						if (rid && last) {
+							delete this.pending[rid];
+							this.pendingOrder = this.pendingOrder.filter(id => id !== rid);
+							last.reject(new Error(frame.message));
+						}
 					}
 				}
 			} else if (frame.type === 'event') {

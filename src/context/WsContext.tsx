@@ -69,13 +69,16 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
 
 		lastAuthTokenRef.current = token;
 		setAuthReady(false);
-		authPromiseRef.current = client
+		const p = client
 			.authenticate(token)
 			.then(() => { setAuthReady(true); })
 			.catch(e => {
 				setAuthReady(false);
 				throw e;
 			});
+		authPromiseRef.current = p as Promise<void>;
+		// Avoid "Uncaught (in promise)" when nothing has called `ensureAuth()` yet; `await ensureAuth()` still rejects.
+		void p.catch(() => {});
 	}, [authState.isAuthenticated, authState.user?.id, isConnected, client, authReady]);
 
 	const ensureAuth = useMemo(() => {

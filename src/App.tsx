@@ -44,6 +44,7 @@ import { CreatorApproval } from './pages/admin/CreatorApproval';
 import { UserManagement } from './pages/admin/UserManagement';
 import { ContentModeration } from './pages/admin/ContentModeration';
 import { SubscriptionWsSimulation } from './pages/admin/SubscriptionWsSimulation';
+import { AdminAnalytics } from './pages/admin/Analytics';
 
 import { Settings } from './pages/Settings';
 import { ActiveCallScreen } from './pages/call/ActiveCallScreen';
@@ -219,7 +220,8 @@ function AppRoutes() {
 			<Route path="/admin/users" element={<ProtectedRoute roles={['admin']}><UserManagement /></ProtectedRoute>} />
 			<Route path="/admin/moderation" element={<ProtectedRoute roles={['admin']}><ContentModeration /></ProtectedRoute>} />
 			<Route path="/admin/subscription-ws" element={<ProtectedRoute roles={['admin']}><SubscriptionWsSimulation /></ProtectedRoute>} />
-			<Route path="/admin/reports" element={<ProtectedRoute roles={['admin']}><AdminDashboard /></ProtectedRoute>} />
+			<Route path="/admin/analytics" element={<ProtectedRoute roles={['admin']}><AdminAnalytics /></ProtectedRoute>} />
+			<Route path="/admin/reports" element={<ProtectedRoute roles={['admin']}><AdminAnalytics /></ProtectedRoute>} />
 
 			<Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
 			<Route
