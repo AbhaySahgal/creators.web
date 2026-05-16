@@ -7,7 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useWallet } from '../../context/WalletContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useEnsureWsAuth, useWs } from '../../context/WsContext';
-import { compareMinor, inrRupeesToMinor } from '../../utils/money';
+import { compareMinor, formatINRFromMinor, inrRupeesToMinor } from '../../utils/money';
 import { LiveGiftsTray } from '../../components/live/LiveGiftsTray';
 import { TipModal } from '../../components/modals/TipModal';
 import type { VirtualGift } from '../../types';
@@ -42,7 +42,6 @@ export function LiveStreamRoom() {
 	const [showTipModal, setShowTipModal] = useState(false);
 	const [showControls, setShowControls] = useState(true);
 	const [elapsed, setElapsed] = useState('00:00');
-	const [likeCount, setLikeCount] = useState(0);
 	const [floatingGift, setFloatingGift] = useState<{ emoji: string, name: string } | null>(null);
 	const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
 	const [agoraError, setAgoraError] = useState('');
@@ -291,6 +290,11 @@ export function LiveStreamRoom() {
 						<span className="text-foreground dark:text-white text-xs font-semibold">{stream.viewerCount.toLocaleString()}</span>
 					</div>
 
+					<div className="flex items-center gap-1.5 bg-background/70 text-foreground dark:bg-black/40 dark:text-white backdrop-blur-sm rounded-xl px-3 py-1.5 shrink-0">
+						<Heart className="w-3.5 h-3.5 text-rose-300 fill-rose-300" />
+						<span className="text-foreground dark:text-white text-xs font-semibold">{stream.likeCount.toLocaleString()}</span>
+					</div>
+
 					<div className="bg-background/70 text-foreground dark:bg-black/40 dark:text-white backdrop-blur-sm rounded-xl px-3 py-1.5 shrink-0">
 						<span className="text-muted dark:text-white/50 text-xs font-mono">{elapsed}</span>
 					</div>
@@ -298,7 +302,11 @@ export function LiveStreamRoom() {
 					<div className="ml-auto flex items-center gap-2 shrink-0">
 						<div className="flex items-center gap-1.5 bg-amber-500/20 backdrop-blur-sm border border-amber-500/30 rounded-xl px-3 py-1.5">
 							<Gift className="w-3.5 h-3.5 text-amber-400" />
-							<span className="text-amber-400 text-xs font-semibold">{formatINR(totalGiftValue)}</span>
+							<span className="text-amber-400 text-xs font-semibold">
+								{stream.tipTotalMinor > 0 ?
+									formatINRFromMinor(String(stream.tipTotalMinor)) :
+									formatINR(totalGiftValue)}
+							</span>
 						</div>
 
 						<button
@@ -340,14 +348,13 @@ export function LiveStreamRoom() {
 
 							<button
 								type="button"
-								onClick={() => setLikeCount(c => c + 1)}
 								className="h-12 w-12 rounded-full bg-white/10 hover:bg-white/15 text-white/80 hover:text-white flex items-center justify-center relative"
 								aria-label="Like"
 							>
 								<Heart className="h-5 w-5 text-rose-300 fill-rose-300" />
-								{likeCount > 0 && (
-									<span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-										{likeCount > 99 ? '99+' : likeCount}
+								{stream.likeCount > 0 && (
+									<span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[9px] font-bold rounded-full min-w-4 h-4 px-0.5 flex items-center justify-center">
+										{stream.likeCount > 99 ? '99+' : stream.likeCount}
 									</span>
 								)}
 							</button>
