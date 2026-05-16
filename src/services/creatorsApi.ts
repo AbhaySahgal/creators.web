@@ -1,4 +1,6 @@
 import type { User } from '../types';
+import { normalizeLiveTrendingResponse } from './liveWsMap';
+import type { LiveTrendingResponse } from './liveWsTypes';
 import { getSessionToken, setSessionToken } from './sessionToken';
 
 export type PreferredRole = 'fan' | 'creator';
@@ -119,6 +121,18 @@ export interface CreateReportRequest {
 }
 
 export interface CreateReportResponse {
+	ok: true;
+}
+
+/** B11: GET /content/stream-guidelines */
+export interface StreamGuidelinesResponse {
+	key: string;
+	version: string;
+	body: string;
+}
+
+/** B11: POST /me/agreements/stream-guidelines */
+export interface AcceptStreamGuidelinesResponse {
 	ok: true;
 }
 
@@ -416,6 +430,42 @@ export const creatorsApi = {
 		getById(id: string, signal?: AbortSignal): Promise<CreatorProfileResponse> {
 			return requestJson<unknown>(`/creators/${encodeURIComponent(id)}`, { method: 'GET', signal })
 				.then(normalizeCreatorProfileResponse);
+		},
+	},
+	content: {
+		/** B11: GET /content/stream-guidelines */
+		streamGuidelines(signal?: AbortSignal): Promise<StreamGuidelinesResponse> {
+			return requestJson<StreamGuidelinesResponse>('/content/stream-guidelines', {
+				method: 'GET',
+				auth: true,
+				signal,
+			});
+		},
+	},
+	agreements: {
+		/** B11: POST /me/agreements/stream-guidelines */
+		acceptStreamGuidelines(signal?: AbortSignal): Promise<AcceptStreamGuidelinesResponse> {
+			return requestJson<AcceptStreamGuidelinesResponse>('/me/agreements/stream-guidelines', {
+				method: 'POST',
+				body: {},
+				auth: true,
+				signal,
+			});
+		},
+	},
+	live: {
+		/** B2 mirror: GET /live/trending */
+		trending(
+			params: { limit?: number, cursor?: string } = {},
+			signal?: AbortSignal
+		): Promise<LiveTrendingResponse> {
+			const qs = new URLSearchParams();
+			if (params.limit != null) qs.set('limit', String(Math.min(50, Math.max(1, params.limit))));
+			if (params.cursor?.trim()) qs.set('cursor', params.cursor.trim());
+			const query = qs.toString();
+			const path = query ? `/live/trending?${query}` : '/live/trending';
+			return requestJson<unknown>(path, { method: 'GET', auth: true, signal })
+				.then(normalizeLiveTrendingResponse);
 		},
 	},
 	reports: {
