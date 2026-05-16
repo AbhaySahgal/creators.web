@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type Ref } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, TrendingUp, Star, Users, Eye, Compass } from '../../components/icons';
 import { Layout } from '../../components/layout/Layout';
 import { CreatorCard } from '../../components/ui/CreatorCard';
 import { PostCard } from '../../components/ui/PostCard';
 import { mockCreators } from '../../data/users';
-import type { Creator } from '../../types';
+import type { Creator, LiveStream } from '../../types';
 import { useContent } from '../../context/ContentContext';
 import { useLiveStream } from '../../context/LiveStreamContext';
 import { creatorSummaryToCardCreator } from '../../services/creatorWsMap';
 import { useDragScroll } from '../../hooks/useDragScroll';
 import { normalizeHashtagTag, textHasHashtag } from '../../utils/hashtag';
+import { matchesExploreQuery } from '../../utils/exploreSearch';
 
 const CATEGORIES = ['All', 'Fitness', 'Art', 'Tech', 'Travel', 'Music', 'Food', 'Gaming'];
 
@@ -33,9 +34,43 @@ export function Explore() {
 	const [wsCreators, setWsCreators] = useState<Creator[]>([]);
 	const [wsDirCursor, setWsDirCursor] = useState<string | null>(null);
 	const [wsDirLoading, setWsDirLoading] = useState(false);
-	const { getLiveStreams } = useLiveStream();
+	const {
+		getLiveStreams,
+		getTrendingLiveStreams,
+		refreshTrendingLives,
+		ready: liveWsReady,
+		state: liveState,
+	} = useLiveStream();
 	const liveStreams = getLiveStreams();
+	const trendingLiveStreams = getTrendingLiveStreams();
+	const [trendingLiveLoading, setTrendingLiveLoading] = useState(false);
+
+	const searchedTrendingLives = useMemo(() => {
+		if (!debouncedSearch) return trendingLiveStreams;
+		return trendingLiveStreams.filter(s =>
+			matchesExploreQuery(debouncedSearch, s.title, s.creatorName)
+		);
+	}, [trendingLiveStreams, debouncedSearch]);
+
+	const searchedLiveStreams = useMemo(() => {
+		if (!debouncedSearch) return liveStreams;
+		return liveStreams.filter(s =>
+			matchesExploreQuery(debouncedSearch, s.title, s.creatorName)
+		);
+	}, [liveStreams, debouncedSearch]);
+
+	const loadTrendingLives = useCallback((cursor?: string, append = false) => {
+		if (!liveWsReady) return;
+		setTrendingLiveLoading(true);
+		void refreshTrendingLives(cursor, append).finally(() => setTrendingLiveLoading(false));
+	}, [liveWsReady, refreshTrendingLives]);
+
+	useEffect(() => {
+		if (!liveWsReady) return;
+		loadTrendingLives(undefined, false);
+	}, [liveWsReady, loadTrendingLives]);
 	const liveRef = useDragScroll();
+	const trendingLiveRef = useDragScroll();
 	const trendingRef = useDragScroll();
 	const allRef = useDragScroll();
 
@@ -173,36 +208,43 @@ export function Explore() {
 					) : null}
 				</div>
 
-				{!debouncedSearch && category === 'All' && liveStreams.length > 0 && (
+				{category === 'All' && searchedTrendingLives.length > 0 && (
+					<div className="mb-8">
+						<div className="flex items-center gap-2 mb-4">
+							<TrendingUp className="w-4 h-4 text-rose-400" />
+							<h2 className="font-semibold text-foreground text-sm">Trending live</h2>
+							{trendingLiveLoading && <span className="text-xs text-muted">Loading…</span>}
+						</div>
+						<LiveStreamRow
+							streams={searchedTrendingLives}
+							onOpen={id => { void navigate(`/live/${id}`); }}
+							scrollRef={trendingLiveRef}
+						/>
+						{liveState.trendingCursor ? (
+							<div className="mt-3 text-center">
+								<button
+									type="button"
+									onClick={() => { loadTrendingLives(liveState.trendingCursor ?? undefined, true); }}
+									disabled={trendingLiveLoading}
+									className="text-sm font-medium text-rose-400 hover:text-rose-300 disabled:opacity-50"
+								>
+									Load more trending live
+								</button>
+							</div>
+						) : null}
+					</div>
+				)}
+
+				{category === 'All' && searchedLiveStreams.length > 0 && (
 					<div className="mb-8">
 						<div className="flex items-center gap-2 mb-4">
 							<h2 className="font-semibold text-foreground text-sm">Live Now</h2>
 						</div>
-						<div ref={liveRef} className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 mb-8">
-							{liveStreams.map(stream => (
-								<button
-									key={stream.id}
-									onClick={() => { void navigate(`/live/${stream.id}`); }}
-									className="relative bg-surface border border-border/20 rounded-2xl overflow-hidden hover:border-border/30 transition-all group flex-shrink-0 w-64 sm:w-72"
-								>
-									<div className="relative h-28">
-										<img src={stream.creatorAvatar} alt={stream.creatorName} className="w-full h-full object-cover scale-105 blur-sm brightness-50" />
-										<div className="absolute inset-0 bg-gradient-to-b from-transparent to-overlay/60" />
-										<div className="absolute top-2 left-2 flex items-center gap-1.5 bg-rose-500 rounded-lg px-2 py-0.5">
-											<div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-											<span className="text-white text-[10px] font-bold">LIVE</span>
-										</div>
-										<div className="absolute top-2 right-2 flex items-center gap-1 bg-background/70 text-foreground dark:bg-overlay/50 dark:text-white rounded-lg px-2 py-0.5 backdrop-blur-sm">
-											<Eye className="w-3 h-3 text-muted dark:text-white/70" />
-											<span className="text-foreground dark:text-white text-[10px] font-semibold">{stream.viewerCount.toLocaleString()}</span>
-										</div>
-										<div className="px-3 py-2.5">
-											<p className="text-muted dark:text-white/70 text-xs truncate">{stream.title}</p>
-										</div>
-									</div>
-								</button>
-							))}
-						</div>
+						<LiveStreamRow
+							streams={searchedLiveStreams}
+							onOpen={id => { void navigate(`/live/${id}`); }}
+							scrollRef={liveRef}
+						/>
 					</div>
 				)}
 
@@ -277,5 +319,51 @@ export function Explore() {
 				) : null}
 			</div>
 		</Layout>
+	);
+}
+
+function LiveStreamRow({
+	streams,
+	onOpen,
+	scrollRef,
+}: {
+	streams: LiveStream[],
+	onOpen: (id: string) => void,
+	scrollRef: ReturnType<typeof useDragScroll>,
+}) {
+	return (
+		<div ref={scrollRef as Ref<HTMLDivElement>} className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4">
+			{streams.map(stream => {
+				const thumb = stream.bannerUrl || stream.creatorAvatar;
+				return (
+					<button
+						key={stream.id}
+						type="button"
+						onClick={() => onOpen(stream.id)}
+						className="relative bg-surface border border-border/20 rounded-2xl overflow-hidden hover:border-border/30 transition-all group flex-shrink-0 w-64 sm:w-72"
+					>
+						<div className="relative h-28">
+							<img
+								src={thumb}
+								alt={stream.creatorName}
+								className={`w-full h-full object-cover ${stream.bannerUrl ? '' : 'scale-105 blur-sm brightness-50'}`}
+							/>
+							<div className="absolute inset-0 bg-gradient-to-b from-transparent to-overlay/60" />
+							<div className="absolute top-2 left-2 flex items-center gap-1.5 bg-rose-500 rounded-lg px-2 py-0.5">
+								<div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+								<span className="text-white text-[10px] font-bold">LIVE</span>
+							</div>
+							<div className="absolute top-2 right-2 flex items-center gap-1 bg-background/70 text-foreground dark:bg-overlay/50 dark:text-white rounded-lg px-2 py-0.5 backdrop-blur-sm">
+								<Eye className="w-3 h-3 text-muted dark:text-white/70" />
+								<span className="text-foreground dark:text-white text-[10px] font-semibold">{stream.viewerCount.toLocaleString()}</span>
+							</div>
+							<div className="px-3 py-2.5">
+								<p className="text-muted dark:text-white/70 text-xs truncate">{stream.title}</p>
+							</div>
+						</div>
+					</button>
+				);
+			})}
+		</div>
 	);
 }
