@@ -2,13 +2,23 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useWs, useWsAuthReady, useWsConnected } from './WsContext';
 import { useAuth } from './AuthContext';
 import { mockCreators } from '../data/users';
-import { liveEndLive, liveGoLive, liveJoinLive, liveListLive } from '../services/liveWsService';
+import { creatorsApi } from '../services/creatorsApi';
+import { normalizeLiveDto, normalizeLiveStats, statsFromLiveDto } from '../services/liveWsMap';
+import {
+	liveEndLive,
+	liveGoLive,
+	liveJoinLive,
+	liveListLive,
+	liveStats,
+	liveTrending,
+	type LiveGoLiveOpts,
+} from '../services/liveWsService';
 import type {
+	LiveDTO,
 	LiveEndLiveResponse,
 	LiveEndedEvent,
 	LivePublic,
-	LiveStartedEvent,
-	LiveVisibility,
+	LiveStats,
 	LiveWithAgora,
 } from '../services/liveWsTypes';
 import type { ChatMessageDTO } from '../services/chatWsTypes';
@@ -39,6 +49,8 @@ const MOCK_LIVE_STREAMS: LiveStream[] = [
 		title: 'Morning workout session (live)',
 		viewerCount: 342,
 		peakViewers: 420,
+		likeCount: 0,
+		tipTotalMinor: 0,
 		startedAt: new Date(Date.now() - 1800000).toISOString(),
 		status: 'live',
 		giftsReceived: 28,
@@ -89,6 +101,8 @@ const MOCK_LIVE_STREAMS: LiveStream[] = [
 		title: 'Late night studio session',
 		viewerCount: 891,
 		peakViewers: 1200,
+		likeCount: 0,
+		tipTotalMinor: 0,
 		startedAt: new Date(Date.now() - 3600000).toISOString(),
 		status: 'live',
 		giftsReceived: 76,
@@ -119,6 +133,8 @@ interface OverlayState {
 	giftsReceived: number;
 	totalGiftValue: number;
 	viewerCount: number;
+	likeCount: number;
+	tipTotalMinor: number;
 }
 
 const EMPTY_OVERLAY: OverlayState = {
@@ -126,12 +142,16 @@ const EMPTY_OVERLAY: OverlayState = {
 	giftsReceived: 0,
 	totalGiftValue: 0,
 	viewerCount: 0,
+	likeCount: 0,
+	tipTotalMinor: 0,
 };
 
 interface LiveStreamState {
 	myLive: LiveWithAgora | null;
 	joinedLive: LiveWithAgora | null;
 	discovery: LivePublic[];
+	trendingDiscovery: LiveDTO[];
+	trendingCursor: string | null;
 	overlay: Record<string, OverlayState>;
 }
 
@@ -139,6 +159,8 @@ const initialState: LiveStreamState = {
 	myLive: null,
 	joinedLive: null,
 	discovery: [],
+	trendingDiscovery: [],
+	trendingCursor: null,
 	overlay: {},
 };
 
@@ -151,6 +173,9 @@ type Action =
 	{ type: 'APPEND_CHAT', payload: { liveId: string, message: LiveChatMessage } } |
 	{ type: 'APPEND_GIFT', payload: { liveId: string, message: LiveChatMessage, value: number } } |
 	{ type: 'SET_VIEWER_COUNT', payload: { liveId: string, count: number } } |
+	{ type: 'APPLY_STATS', payload: LiveStats } |
+	{ type: 'SET_TRENDING', payload: { lives: LiveDTO[], nextCursor: string | null } } |
+	{ type: 'APPEND_TRENDING', payload: { lives: LiveDTO[], nextCursor: string | null } } |
 	{ type: 'CLEAR_OVERLAY', payload: { liveId: string } };
 
 function ensureOverlay(state: LiveStreamState, liveId: string): OverlayState {
@@ -167,10 +192,25 @@ function liveReducer(state: LiveStreamState, action: Action): LiveStreamState {
 			return { ...state, discovery: action.payload };
 		case 'UPSERT_DISCOVERY': {
 			const idx = state.discovery.findIndex(l => l.live_id === action.payload.live_id);
-			if (idx === -1) return { ...state, discovery: [action.payload, ...state.discovery] };
-			const next = state.discovery.slice();
-			next[idx] = action.payload;
-			return { ...state, discovery: next };
+			const discovery = idx === -1 ?
+				[action.payload, ...state.discovery] :
+				(() => {
+					const next = state.discovery.slice();
+					next[idx] = action.payload;
+					return next;
+				})();
+			const dtoStats = statsFromLiveDto(action.payload);
+			const overlay = { ...state.overlay };
+			if (dtoStats) {
+				const cur = overlay[action.payload.live_id] ?? EMPTY_OVERLAY;
+				overlay[action.payload.live_id] = {
+					...cur,
+					viewerCount: dtoStats.viewer_count,
+					likeCount: dtoStats.like_count,
+					tipTotalMinor: dtoStats.tip_total_minor,
+				};
+			}
+			return { ...state, discovery, overlay };
 		}
 		case 'REMOVE_DISCOVERY':
 			return {
@@ -218,6 +258,37 @@ function liveReducer(state: LiveStreamState, action: Action): LiveStreamState {
 				},
 			};
 		}
+		case 'APPLY_STATS': {
+			const cur = ensureOverlay(state, action.payload.live_id);
+			return {
+				...state,
+				overlay: {
+					...state.overlay,
+					[action.payload.live_id]: {
+						...cur,
+						viewerCount: action.payload.viewer_count,
+						likeCount: action.payload.like_count,
+						tipTotalMinor: action.payload.tip_total_minor,
+					},
+				},
+			};
+		}
+		case 'SET_TRENDING':
+			return {
+				...state,
+				trendingDiscovery: action.payload.lives,
+				trendingCursor: action.payload.nextCursor,
+			};
+		case 'APPEND_TRENDING': {
+			const seen: Record<string, true> = {};
+			for (const l of state.trendingDiscovery) seen[l.live_id] = true;
+			const add = action.payload.lives.filter(l => !seen[l.live_id]);
+			return {
+				...state,
+				trendingDiscovery: [...state.trendingDiscovery, ...add],
+				trendingCursor: action.payload.nextCursor,
+			};
+		}
 		case 'CLEAR_OVERLAY': {
 			if (!state.overlay[action.payload.liveId]) return state;
 			const next = { ...state.overlay };
@@ -233,8 +304,8 @@ interface LiveStreamContextValue {
 	state: LiveStreamState;
 	/** WS + chat readiness — UI can disable buttons until true. */
 	ready: boolean;
-	/** Creator path: `/golive <visibility> [title]`; resolves with backend Agora creds. */
-	goLive: (visibility: LiveVisibility, title: string) => Promise<LiveWithAgora>;
+	/** Creator path: `/golive` with optional banner; resolves with backend Agora creds. */
+	goLive: (opts: LiveGoLiveOpts) => Promise<LiveWithAgora>;
 	/** Fan path: `/joinlive <liveId>`; resolves with backend Agora creds (audience). */
 	joinLive: (liveId: string) => Promise<LiveWithAgora>;
 	/**
@@ -246,8 +317,14 @@ interface LiveStreamContextValue {
 	endLive: () => Promise<LiveEndLiveResponse>;
 	/** Pull `/listlive` again (Explore refresh). */
 	refreshLives: () => Promise<void>;
+	/** B2: ranked live discovery for Explore. */
+	refreshTrendingLives: (cursor?: string, append?: boolean) => Promise<void>;
+	/** On-demand stats snapshot (reconnect / missed push). */
+	refreshLiveStats: (liveId: string) => Promise<void>;
 	/** Discovery list mapped to legacy `LiveStream` for the existing Explore UI. */
 	getLiveStreams: () => LiveStream[];
+	/** Trending lives from `/trending`. */
+	getTrendingLiveStreams: () => LiveStream[];
 	/** Look up a stream by id (`live_id` for backend rows, mock id for fallback). */
 	getStream: (streamId: string) => LiveStream | undefined;
 	/** Local-only helpers (UI sugar; not in spec). */
@@ -317,14 +394,18 @@ function publicToLegacyStream(
 	const ovl = overlay ?? EMPTY_OVERLAY;
 	const status: 'live' | 'ended' | 'offline' =
 		row.status === 'ended' ? 'ended' : 'live';
+	const viewers = ovl.viewerCount || row.viewer_count || 0;
 	return {
 		id: row.live_id,
 		creatorId: row.creator_user_id,
 		creatorName: display.name,
 		creatorAvatar: display.avatar,
 		title: row.title,
-		viewerCount: ovl.viewerCount,
-		peakViewers: ovl.viewerCount,
+		viewerCount: viewers,
+		peakViewers: Math.max(viewers, row.viewer_count ?? 0),
+		likeCount: ovl.likeCount || row.like_count || 0,
+		tipTotalMinor: ovl.tipTotalMinor || row.tip_total_minor || 0,
+		bannerUrl: row.banner_url ?? undefined,
 		startedAt: row.started_at,
 		endedAt: row.ended_at ?? undefined,
 		status,
@@ -332,6 +413,11 @@ function publicToLegacyStream(
 		totalGiftValue: ovl.totalGiftValue,
 		chatMessages: ovl.chatMessages,
 	};
+}
+
+function applyStatsDispatch(dispatch: React.Dispatch<Action>, stats: LiveStats | null | undefined) {
+	if (!stats?.live_id) return;
+	dispatch({ type: 'APPLY_STATS', payload: stats });
 }
 
 export function LiveStreamProvider({ children }: { children: React.ReactNode }) {
@@ -364,24 +450,52 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 		saveHostLiveCredsByUser(next);
 	}, [authState.user?.id]);
 
+	const listFilter = authState.user ? 'all' as const : 'everyone' as const;
+
 	const refreshLives = useCallback((): Promise<void> => {
 		if (!ws.isConnected) return Promise.resolve();
-		return liveListLive(ws)
+		return liveListLive(ws, { filter: listFilter, limit: 30 })
 			.then(res => {
 				dispatch({ type: 'SET_DISCOVERY', payload: res.lives ?? [] });
 			})
 			.catch(() => {
 				// Soft fail — Explore will continue showing the current discovery list (or fallback).
 			});
+	}, [ws, listFilter]);
+
+	const refreshTrendingLives = useCallback((cursor?: string, append = false): Promise<void> => {
+		if (!ws.isConnected) return Promise.resolve();
+		const apply = (res: { lives: LiveDTO[], nextCursor?: string | null }) => {
+			const payload = { lives: res.lives ?? [], nextCursor: res.nextCursor ?? null };
+			dispatch(append ? { type: 'APPEND_TRENDING', payload } : { type: 'SET_TRENDING', payload });
+		};
+		return liveTrending(ws, { limit: 10, cursor })
+			.then(apply)
+			.catch(() =>
+				creatorsApi.live.trending({ limit: 10, cursor })
+					.then(apply)
+					.catch(() => {
+						if (!append) dispatch({ type: 'SET_TRENDING', payload: { lives: [], nextCursor: null } });
+					})
+			);
+	}, [ws]);
+
+	const refreshLiveStats = useCallback((liveId: string): Promise<void> => {
+		if (!ws.isConnected || !liveId) return Promise.resolve();
+		return liveStats(ws, liveId)
+			.then(r => {
+				applyStatsDispatch(dispatch, r.stats);
+			})
+			.catch(() => {});
 	}, [ws]);
 
 	const goLive = useCallback(
-		(visibility: LiveVisibility, title: string): Promise<LiveWithAgora> => {
-			return liveGoLive(ws, { visibility, title }).then(res => {
+		(opts: LiveGoLiveOpts): Promise<LiveWithAgora> => {
+			return liveGoLive(ws, opts).then(res => {
 				dispatch({ type: 'SET_MY_LIVE', payload: res });
 				dispatch({ type: 'UPSERT_DISCOVERY', payload: stripAgora(res) });
+				applyStatsDispatch(dispatch, res.stats ?? statsFromLiveDto(res));
 				persistHostCreds(res);
-				// Creator joins the chat room so they receive `chat|c` for viewer messages.
 				if (res.room_id) {
 					void ws.request('chat', 'joinroom', [res.room_id]).catch(() => {});
 				}
@@ -393,15 +507,15 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 
 	const joinLive = useCallback(
 		(liveId: string): Promise<LiveWithAgora> => {
-			// In dev, React Strict Mode can run effects twice (mount → unmount → mount).
-			// If a viewer opens a live stream, the page effect may call joinLive twice.
-			// Deduplicate in-flight joins per liveId so we don't spam `/joinlive` and `/joinroom`.
 			const inflight = joinLiveInflightRef.current[liveId];
 			if (inflight !== undefined) return inflight;
 
 			const p = liveJoinLive(ws, liveId).then(res => {
 				dispatch({ type: 'SET_JOINED_LIVE', payload: res });
 				dispatch({ type: 'UPSERT_DISCOVERY', payload: stripAgora(res) });
+				const stats = res.stats ?? statsFromLiveDto(res);
+				applyStatsDispatch(dispatch, stats);
+				if (!stats) void refreshLiveStats(liveId);
 				if (res.room_id) {
 					void ws.request('chat', 'joinroom', [res.room_id]).catch(() => {});
 				}
@@ -412,7 +526,7 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 				if (joinLiveInflightRef.current[liveId] === p) delete joinLiveInflightRef.current[liveId];
 			});
 		},
-		[ws]
+		[ws, refreshLiveStats]
 	);
 
 	const leaveLiveViewer = useCallback((liveId: string) => {
@@ -465,8 +579,11 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 
 	// Subscribe to push events. `ws.on(...)` returns an unsubscribe.
 	useEffect(() => {
+		const offStats = ws.on('live', 'statsupdate', data => {
+			applyStatsDispatch(dispatch, normalizeLiveStats(data) ?? undefined);
+		});
 		const offStarted = ws.on('live', 'started', data => {
-			const payload = data as LiveStartedEvent;
+			const payload = normalizeLiveDto(data);
 			if (!payload?.live_id) return;
 			dispatch({ type: 'UPSERT_DISCOVERY', payload });
 		});
@@ -507,6 +624,7 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 			dispatch({ type: 'APPEND_CHAT', payload: { liveId: target.live_id, message } });
 		});
 		return () => {
+			offStats();
 			offStarted();
 			offEnded();
 			offChat();
@@ -519,10 +637,11 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 	useEffect(() => {
 		if (!ready) return;
 		const uid = authState.user?.id ?? '';
-		void liveListLive(ws)
+		void liveListLive(ws, { filter: listFilter, limit: 30 })
 			.then(res => {
 				const lives = res.lives ?? [];
 				dispatch({ type: 'SET_DISCOVERY', payload: lives });
+				void refreshTrendingLives(undefined, false);
 				if (!uid) return;
 
 				const cached = hostCredsByUserRef.current[uid];
@@ -553,7 +672,7 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 			.catch(() => {
 				// Soft fail — Explore continues with mock fallback; resume can be retried on next ready.
 			});
-	}, [ready, ws, authState.user?.id, persistHostCreds]);
+	}, [ready, ws, authState.user?.id, persistHostCreds, listFilter, refreshTrendingLives]);
 
 	const getLiveStreams = useCallback((): LiveStream[] => {
 		// Spec is the source of truth when the socket is auth-ready; otherwise show fallbacks.
@@ -570,6 +689,21 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 				pickCreatorDisplay(row.creator_user_id, profileMap)
 			));
 	}, [ready, state.discovery, state.overlay, authState.creatorProfiles]);
+
+	const getTrendingLiveStreams = useCallback((): LiveStream[] => {
+		if (!ready) return [];
+		const profileMap: Record<string, { name: string, avatar: string }> = {};
+		for (const [id, p] of Object.entries(authState.creatorProfiles)) {
+			profileMap[id] = { name: p.name, avatar: p.avatar };
+		}
+		return state.trendingDiscovery
+			.filter(l => l.status !== 'ended')
+			.map(row => publicToLegacyStream(
+				row,
+				state.overlay[row.live_id],
+				pickCreatorDisplay(row.creator_user_id, profileMap)
+			));
+	}, [ready, state.trendingDiscovery, state.overlay, authState.creatorProfiles]);
 
 	const getStream = useCallback((streamId: string): LiveStream | undefined => {
 		if (!streamId) return undefined;
@@ -607,7 +741,10 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 		leaveLiveViewer,
 		endLive,
 		refreshLives,
+		refreshTrendingLives,
+		refreshLiveStats,
 		getLiveStreams,
+		getTrendingLiveStreams,
 		getStream,
 		appendLocalChat,
 		appendLocalGift,
@@ -616,7 +753,8 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 	}), [
 		state, ready,
 		goLive, joinLive, leaveLiveViewer, endLive, refreshLives,
-		getLiveStreams, getStream,
+		refreshTrendingLives, refreshLiveStats,
+		getLiveStreams, getTrendingLiveStreams, getStream,
 		appendLocalChat, appendLocalGift, setLocalViewerCount,
 	]);
 
