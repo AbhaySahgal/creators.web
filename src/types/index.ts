@@ -36,6 +36,9 @@ export interface LiveStream {
 	title: string;
 	viewerCount: number;
 	peakViewers: number;
+	likeCount: number;
+	tipTotalMinor: number;
+	bannerUrl?: string;
 	startedAt: string;
 	endedAt?: string;
 	status: LiveStreamStatus;
