@@ -16,10 +16,12 @@ import {
 	Sparkles,
 	Zap,
 	Lock,
+	Check,
 } from '../../components/icons';
 import { useLiveStream, useMyActiveLive, VIRTUAL_GIFTS } from '../../context/LiveStreamContext';
 import { useCurrentCreator } from '../../context/AuthContext';
 import { useEnsureWsAuth, useWs } from '../../context/WsContext';
+import { apiErrorMessage, creatorsApi } from '../../services/creatorsApi';
 import type { LiveVisibility, LiveWithAgora } from '../../services/liveWsTypes';
 import { formatINR } from '../../services/razorpay';
 
@@ -84,14 +86,16 @@ export function GoLivePage() {
 	const myActiveLive = useMyActiveLive();
 	const [visibility, setVisibility] = useState<LiveVisibility>('everyone');
 	const [title, setTitle] = useState('');
+	const [bannerUrl, setBannerUrl] = useState('');
 	const [isLive, setIsLive] = useState(false);
 	const [activeLiveId, setActiveLiveId] = useState<string | null>(null);
 	const [elapsed, setElapsed] = useState('00:00');
 	const [text, setText] = useState('');
-	const [viewerSimCount, setViewerSimCount] = useState(0);
 	const [agoraError, setAgoraError] = useState('');
 	const [hasLocalVideo, setHasLocalVideo] = useState(false);
 	const [goLiveError, setGoLiveError] = useState('');
+	const [guidelinesAccepted, setGuidelinesAccepted] = useState(false);
+	const [acceptingGuidelines, setAcceptingGuidelines] = useState(false);
 	const [showEndConfirm, setShowEndConfirm] = useState(false);
 	const [previewError, setPreviewError] = useState('');
 	const [previewResolution, setPreviewResolution] = useState('—');
@@ -103,7 +107,6 @@ export function GoLivePage() {
 	/** True once mic/camera preview acquisition has settled (needed before host attach to avoid publishing audio-only). */
 	const [localTracksPrimed, setLocalTracksPrimed] = useState(false);
 	const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
-	const viewerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const chatEndRef = useRef<HTMLDivElement>(null);
 	const localVideoRef = useRef<HTMLDivElement | null>(null);
 	const previewContainerRef = useRef<HTMLDivElement | null>(null);
@@ -189,7 +192,6 @@ export function GoLivePage() {
 	useEffect(() => {
 		return () => {
 			if (elapsedRef.current) clearInterval(elapsedRef.current);
-			if (viewerRef.current) clearInterval(viewerRef.current);
 			hostAudioTrackRef.current?.close();
 			hostVideoTrackRef.current?.close();
 			hostAudioTrackRef.current = null;
@@ -199,14 +201,6 @@ export function GoLivePage() {
 			hostClientRef.current = null;
 		};
 	}, []);
-
-	useEffect(() => {
-		const id = activeLiveId;
-		if (!id) return;
-		const latest = getStream(id);
-		const n = latest?.viewerCount ?? 0;
-		setViewerSimCount(n);
-	}, [activeLiveId, getStream]);
 
 	useEffect(() => {
 		const id = activeLiveId;
@@ -229,7 +223,6 @@ export function GoLivePage() {
 		if (!isLive || userEndedRef.current) return;
 		if (lsState.myLive !== null) return;
 		if (elapsedRef.current) clearInterval(elapsedRef.current);
-		if (viewerRef.current) clearInterval(viewerRef.current);
 		hostAudioTrackRef.current?.close();
 		hostVideoTrackRef.current?.close();
 		hostAudioTrackRef.current = null;
@@ -294,13 +287,6 @@ export function GoLivePage() {
 		elapsedRef.current = setInterval(() => {
 			setElapsed(formatElapsed(startedAt));
 		}, 1000);
-		let viewers = s?.viewerCount ?? 0;
-		setViewerSimCount(viewers);
-		viewerRef.current = setInterval(() => {
-			const delta = Math.floor(Math.random() * 5) - 1;
-			viewers = Math.max(0, viewers + delta + 2);
-			setViewerSimCount(viewers);
-		}, 3000);
 	}
 
 	type AttachOpts = { getCancelled?: () => boolean };
@@ -411,24 +397,59 @@ export function GoLivePage() {
 		});
 	}
 
+	function isGuidelinesError(message: string): boolean {
+		const m = message.toLowerCase();
+		return m.includes('guideline') || m.includes('streaming policy') || m.includes('not accepted');
+	}
+
+	function runGoLive() {
+		return ensureAuth().then(() => goLive({
+			visibility,
+			title: title.trim(),
+			bannerUrl: bannerUrl.trim() || undefined,
+		}));
+	}
+
+	function handleGuidelinesToggle() {
+		if (guidelinesAccepted) {
+			setGuidelinesAccepted(false);
+			return;
+		}
+		setAcceptingGuidelines(true);
+		setGoLiveError('');
+		void creatorsApi.agreements.acceptStreamGuidelines()
+			.then(() => { setGuidelinesAccepted(true); })
+			.catch((e: unknown) => {
+				setGoLiveError(apiErrorMessage(e, 'Could not accept streaming guidelines'));
+			})
+			.finally(() => { setAcceptingGuidelines(false); });
+	}
+
 	function handleGoLive() {
 		if (!title.trim()) return;
+		if (!guidelinesAccepted) {
+			setGoLiveError('Accept the streaming guidelines before going live.');
+			return;
+		}
 		if (!liveWsReady) {
 			setGoLiveError('Connect and sign in before going live.');
 			return;
 		}
 		setGoLiveError('');
-		void ensureAuth()
-			.then(() => goLive(visibility, title.trim()))
-			.catch((e: unknown) => {
-				setGoLiveError(e instanceof Error ? e.message : 'Could not go live');
-			});
+		void runGoLive().catch((e: unknown) => {
+			const msg = e instanceof Error ? e.message : 'Could not go live';
+			if (isGuidelinesError(msg)) {
+				setGuidelinesAccepted(false);
+				setGoLiveError('Guidelines were updated — tick to accept again before going live.');
+			} else {
+				setGoLiveError(msg);
+			}
+		});
 	}
 
 	function handleEndLive() {
 		userEndedRef.current = true;
 		if (elapsedRef.current) clearInterval(elapsedRef.current);
-		if (viewerRef.current) clearInterval(viewerRef.current);
 		cleanupHostMedia();
 		setIsLive(false);
 		setActiveLiveId(null);
@@ -454,6 +475,7 @@ export function GoLivePage() {
 	}
 
 	const currentStream = activeLiveId ? getStream(activeLiveId) ?? null : null;
+	const hostViewerCount = currentStream?.viewerCount ?? 0;
 	const totalGiftValue = currentStream?.totalGiftValue ?? 0;
 
 	if (!isLive) {
@@ -623,6 +645,18 @@ export function GoLivePage() {
 								</div>
 
 								<div>
+									<label className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+										Banner image URL (optional)
+									</label>
+									<input
+										value={bannerUrl}
+										onChange={e => setBannerUrl(e.target.value)}
+										placeholder="https://…"
+										className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-rose-500/50 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+									/>
+								</div>
+
+								<div>
 									<p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
 										Who can watch
 									</p>
@@ -686,11 +720,39 @@ export function GoLivePage() {
 									<p className="text-xs text-zinc-500">Waiting for WebSocket…</p>
 								)}
 
-								<div className="pt-2">
+								<div className="pt-2 space-y-3">
+									<button
+										type="button"
+										onClick={() => { handleGuidelinesToggle(); }}
+										disabled={acceptingGuidelines}
+										className={
+											'flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ' +
+											(guidelinesAccepted ?
+												'border-rose-500/50 bg-rose-500/10' :
+												'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700') +
+												(acceptingGuidelines ? ' cursor-wait opacity-70' : '')
+										}
+									>
+										<span
+											className={
+												'flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ' +
+												(guidelinesAccepted ?
+													'border-rose-500 bg-rose-500 text-white' :
+													'border-zinc-600 bg-zinc-900')
+											}
+										>
+											{guidelinesAccepted && <Check className="h-3.5 w-3.5" />}
+										</span>
+										<span className="text-sm text-zinc-300">
+											{acceptingGuidelines ?
+												'Accepting guidelines…' :
+												'I accept the Streaming Guidelines'}
+										</span>
+									</button>
 									<button
 										type="button"
 										onClick={() => { handleGoLive(); }}
-										disabled={!title.trim() || !liveWsReady}
+										disabled={!title.trim() || !liveWsReady || !guidelinesAccepted || acceptingGuidelines}
 										className={
 											'flex w-full items-center justify-center gap-2 rounded-xl bg-rose-500 py-4 ' +
 											'text-sm font-bold text-white shadow-lg shadow-rose-500/25 transition-all ' +
@@ -700,10 +762,6 @@ export function GoLivePage() {
 										<Zap className="h-5 w-5" />
 										Go Live Now
 									</button>
-									<p className="mt-3 text-center text-xs text-zinc-500">
-										By going live, you agree to the{' '}
-										<a href="#" className="text-rose-500 hover:underline">Streaming Guidelines</a>.
-									</p>
 								</div>
 							</div>
 						</div>
@@ -737,7 +795,7 @@ export function GoLivePage() {
 					</div>
 					<div className="flex items-center gap-1.5 bg-background/70 text-foreground dark:bg-black/40 dark:text-white backdrop-blur-sm rounded-xl px-3 py-1.5 shrink-0">
 						<Eye className="w-3.5 h-3.5 text-muted dark:text-white/60" />
-						<span className="text-foreground dark:text-white text-xs font-semibold">{viewerSimCount}</span>
+						<span className="text-foreground dark:text-white text-xs font-semibold">{hostViewerCount.toLocaleString()}</span>
 					</div>
 					<div className="bg-background/70 text-foreground dark:bg-black/40 dark:text-white backdrop-blur-sm rounded-xl px-3 py-1.5 shrink-0">
 						<span className="text-muted dark:text-white/50 text-xs font-mono">{elapsed}</span>
