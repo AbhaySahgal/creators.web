@@ -1,6 +1,6 @@
 import type { CreatorsMultiplexWs } from './creatorsMultiplexWs';
 import type { WsClient } from './wsClient';
-import type { CreatorGetResponse, CreatorListResponse, CreatorUpsertResponse } from './creatorWsTypes';
+import type { CreatorGetResponse, CreatorListResponse, CreatorTopResponse, CreatorUpsertResponse } from './creatorWsTypes';
 
 export interface CreatorFollowResponse {
 	ok: true;
@@ -102,4 +102,22 @@ export function creatorUnfollow(ws: WsClient, creatorUserId: string, requestId?:
 	const rid = requestId?.trim() || undefined;
 	if (rid && /\s/.test(rid)) throw new Error('requestId must not contain spaces');
 	return ws.request('creator', 'unfollow', [id], rid).then(json => json as CreatorUnfollowResponse);
+}
+
+export function buildCreatorTopCommand(opts?: { limit?: number, cursor?: string }): string {
+	const lim = Math.min(50, Math.max(1, opts?.limit ?? 10));
+	const parts: string[] = ['/top', `limit=${lim}`];
+	if (opts?.cursor?.trim()) parts.push(`cursor=${opts.cursor.trim()}`);
+	return parts.join(' ');
+}
+
+export function creatorWsTop(client: CreatorsMultiplexWs, opts?: { limit?: number, cursor?: string }): Promise<CreatorTopResponse> {
+	return client.send('creator', buildCreatorTopCommand(opts)).then(json => json as CreatorTopResponse);
+}
+
+export function creatorWsTopPrimary(ws: WsClient, opts?: { limit?: number, cursor?: string }): Promise<CreatorTopResponse> {
+	const lim = Math.min(50, Math.max(1, opts?.limit ?? 10));
+	const args: string[] = [`limit=${lim}`];
+	if (opts?.cursor?.trim()) args.push(`cursor=${opts.cursor.trim()}`);
+	return ws.request('creator', 'top', args).then(json => json as CreatorTopResponse);
 }

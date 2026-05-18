@@ -36,3 +36,23 @@ export interface CreatorGetResponse {
 export interface CreatorUpsertResponse {
 	creator: CreatorProfileDTO;
 }
+
+export interface CreatorTopRowDTO {
+	id: string;
+	user_id: string;
+	username: string;
+	name: string;
+	avatar_url: string | null;
+	categories: string[];
+	rank: number;
+	score: string;
+	score_follower_term?: string;
+	score_tips_minor_capped?: string;
+	follower_count: number;
+	tips_minor_last_30d?: string;
+}
+
+export interface CreatorTopResponse {
+	creators: CreatorTopRowDTO[];
+	nextCursor: string | null;
+}

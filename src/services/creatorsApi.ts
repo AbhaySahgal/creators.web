@@ -1,4 +1,12 @@
 import type { User } from '../types';
+import type {
+	AdminKycListResponse,
+	CuratedTopResponse,
+	CuratedTopSetRequest,
+	KycSubmitRequest,
+	KycSubmitResponse,
+} from './kycTypes';
+import { normalizeAdminKycListResponse, normalizeCuratedTopResponse } from './kycMap';
 import { getSessionToken, setSessionToken } from './sessionToken';
 
 export type PreferredRole = 'fan' | 'creator';
@@ -363,6 +371,11 @@ export const creatorsApi = {
 				return requestJson<UpdateNotificationSettingsResponse>('/me/notification-settings', { method: 'PUT', body, auth: true });
 			},
 		},
+		kyc: {
+			submit(body: KycSubmitRequest): Promise<KycSubmitResponse> {
+				return requestJsonAllow201<KycSubmitResponse>('/me/kyc/applications', { method: 'POST', body, auth: true });
+			},
+		},
 	},
 	payments: {
 		/** GET /payments/gateway — source of truth for which provider the app uses. */
@@ -421,6 +434,42 @@ export const creatorsApi = {
 	reports: {
 		create(body: CreateReportRequest): Promise<CreateReportResponse> {
 			return requestJson<CreateReportResponse>('/reports', { method: 'POST', body, auth: true });
+		},
+	},
+	admin: {
+		kyc: {
+			list(params?: { status?: string, limit?: number, before?: string }): Promise<AdminKycListResponse> {
+				const q = new URLSearchParams();
+				if (params?.status?.trim()) q.set('status', params.status.trim());
+				if (params?.limit != null) q.set('limit', String(params.limit));
+				if (params?.before?.trim()) q.set('before', params.before.trim());
+				const qs = q.toString();
+				const path = qs ? `/admin/kyc/applications?${qs}` : '/admin/kyc/applications';
+				return requestJson<unknown>(path, { method: 'GET', auth: true })
+					.then(json => normalizeAdminKycListResponse(json));
+			},
+			approve(applicationId: string): Promise<{ ok: true }> {
+				return requestJson<{ ok: true }>(
+					`/admin/kyc/applications/${encodeURIComponent(applicationId)}/approve`,
+					{ method: 'POST', auth: true }
+				);
+			},
+			reject(applicationId: string, reason: string): Promise<{ ok: true }> {
+				return requestJson<{ ok: true }>(
+					`/admin/kyc/applications/${encodeURIComponent(applicationId)}/reject`,
+					{ method: 'POST', body: { reason }, auth: true }
+				);
+			},
+		},
+		curatedTop: {
+			get(): Promise<CuratedTopResponse> {
+				return requestJson<unknown>('/admin/creators/topcreator', { method: 'GET', auth: true })
+					.then(json => normalizeCuratedTopResponse(json));
+			},
+			set(body: CuratedTopSetRequest): Promise<CuratedTopResponse> {
+				return requestJson<unknown>('/admin/creators/topcreator', { method: 'POST', body, auth: true })
+					.then(json => normalizeCuratedTopResponse(json));
+			},
 		},
 	},
 };
