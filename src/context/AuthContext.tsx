@@ -541,21 +541,29 @@ export function useCurrentCreator(): Creator | null {
 	const { state } = useAuth();
 	if (state.user?.role !== 'creator') return null;
 	const currentUser = state.user;
+	const profilePatch = state.creatorProfiles[currentUser.id];
 	const creatorMatch = mockCreators.find(c => c.id === currentUser.id);
-	if (creatorMatch) return creatorMatch;
+	if (creatorMatch) {
+		return profilePatch ? { ...creatorMatch, ...profilePatch, id: currentUser.id } : creatorMatch;
+	}
 
+	const dash = currentUser.creatorDashboard;
+	const kycStatus = profilePatch?.kycStatus ?? dash?.kycStatus ?? 'not_submitted';
+	const base = profilePatch ?? createCreatorProfileFromUser(currentUser);
 	return {
-		...mockCreators[0],
+		...base,
 		id: currentUser.id,
 		name: currentUser.name,
 		email: currentUser.email,
 		username: currentUser.username,
 		avatar: currentUser.avatar,
-		bio: currentUser.bio ?? mockCreators[0].bio,
-		banner: currentUser.banner?.trim() ? currentUser.banner : '',
-		category: currentUser.category ?? mockCreators[0].category,
+		bio: currentUser.bio ?? base.bio,
+		banner: currentUser.banner?.trim() ? currentUser.banner : base.banner,
+		category: currentUser.category ?? base.category,
 		createdAt: currentUser.createdAt,
 		status: currentUser.status,
 		walletBalanceMinor: currentUser.walletBalanceMinor,
+		kycStatus,
+		isKYCVerified: kycStatus === 'approved',
 	};
 }

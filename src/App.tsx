@@ -10,6 +10,7 @@ import { SessionProvider } from './context/SessionContext';
 import { LiveStreamProvider } from './context/LiveStreamContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { WsProvider } from './context/WsContext';
+import { KycStatusListener } from './components/auth/KycStatusListener';
 import { SubscriptionProvider } from './context/SubscriptionContext';
 import { SessionsProvider } from './context/SessionsContext';
 import { CallSessionProvider } from './context/CallSessionContext';
@@ -41,6 +42,7 @@ import { KYCFlow } from './pages/creator/KYCFlow';
 
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { CreatorApproval } from './pages/admin/CreatorApproval';
+import { CuratedTop } from './pages/admin/CuratedTop';
 import { UserManagement } from './pages/admin/UserManagement';
 import { ContentModeration } from './pages/admin/ContentModeration';
 import { SubscriptionWsSimulation } from './pages/admin/SubscriptionWsSimulation';
@@ -224,6 +226,7 @@ function AppRoutes() {
 
 				<Route path="/admin" element={<ProtectedRoute roles={['admin']}><AdminDashboard /></ProtectedRoute>} />
 				<Route path="/admin/creators" element={<ProtectedRoute roles={['admin']}><CreatorApproval /></ProtectedRoute>} />
+				<Route path="/admin/curated-top" element={<ProtectedRoute roles={['admin']}><CuratedTop /></ProtectedRoute>} />
 				<Route path="/admin/users" element={<ProtectedRoute roles={['admin']}><UserManagement /></ProtectedRoute>} />
 				<Route path="/admin/moderation" element={<ProtectedRoute roles={['admin']}><ContentModeration /></ProtectedRoute>} />
 				<Route path="/admin/subscription-ws" element={<ProtectedRoute roles={['admin']}><SubscriptionWsSimulation /></ProtectedRoute>} />
@@ -258,6 +261,7 @@ function Providers({ children }: { children: React.ReactNode }) {
 					<WsProvider>
 						<SubscriptionProvider>
 							<NotificationProvider>
+								<KycStatusListener />
 								<ContentProvider>
 									<ChatProvider>
 										<WalletProvider>
