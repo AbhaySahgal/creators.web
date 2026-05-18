@@ -14,6 +14,7 @@ import { SubscriptionProvider } from './context/SubscriptionContext';
 import { SessionsProvider } from './context/SessionsContext';
 import { CallSessionProvider } from './context/CallSessionContext';
 import { MinimizedCallWindow } from './components/call/MinimizedCallWindow';
+import { InboxServerSync } from './components/chat/InboxServerSync';
 
 import { Landing } from './pages/Landing';
 import { Login } from './pages/auth/Login';
@@ -264,6 +265,7 @@ function Providers({ children }: { children: React.ReactNode }) {
 											<CallProvider>
 												<SessionProvider>
 													<SessionsProvider>
+														<InboxServerSync />
 														<CallSessionProvider>
 															<LiveStreamProvider>
 																{children}
