@@ -60,7 +60,7 @@ export function MarketingFooter() {
 						<li>
 							<button
 								type="button"
-								onClick={() => { void navigate('/delete-account-request'); }}
+								onClick={() => { void navigate('/delete-account'); }}
 								className="text-muted hover:text-foreground transition-colors"
 							>
 								Delete account request

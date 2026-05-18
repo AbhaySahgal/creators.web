@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { User, Bell, Shield, LogOut, Eye, EyeOff, Save, Camera } from '../components/icons';
+import { User, Bell, Shield, Eye, EyeOff, Save, Camera, Radio } from '../components/icons';
+import { SettingsDangerZone } from '../components/settings/SettingsDangerZone';
 import { useNavigate } from 'react-router-dom';
 import { Layout } from '../components/layout/Layout';
 import { Button } from '../components/ui/Button';
 import { MediaAvatar } from '../components/ui/MediaAvatar';
+import { StreamGuidelinesModal } from '../components/modals/StreamGuidelinesModal';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
+import { useAccountDeletion } from '../hooks/useAccountDeletion';
 import { ApiError, apiErrorMessage, creatorsApi, type NotificationSettings } from '../services/creatorsApi';
 import { uploadMediaAsset } from '../services/mediaUpload';
 
@@ -34,6 +37,14 @@ export function Settings() {
 	});
 	const [notifLoading, setNotifLoading] = useState(false);
 	const [notifDirty, setNotifDirty] = useState(false);
+	const [showGuidelines, setShowGuidelines] = useState(false);
+	const {
+		status: deleteStatus,
+		scheduledDeleteAt,
+		loading: deleteLoading,
+		refreshStatus: refreshDeleteStatus,
+		exportData,
+	} = useAccountDeletion();
 
 	useEffect(() => {
 		if (!user) return;
@@ -57,6 +68,11 @@ export function Settings() {
 			.finally(() => setNotifLoading(false));
 		// We intentionally load once per Settings mount.
 	}, []);
+
+	useEffect(() => {
+		if (!user) return;
+		void refreshDeleteStatus();
+	}, [user, refreshDeleteStatus]);
 
 	function handleSaveProfile() {
 		setIsSavingProfile(true);
@@ -314,28 +330,42 @@ export function Settings() {
 					</div>
 				</section>
 
-				<section className="bg-surface border border-border/20 rounded-2xl p-5">
-					<h2 className="font-semibold text-foreground mb-3">Danger Zone</h2>
-					<div className="space-y-2">
+				{user?.role === 'creator' && (
+					<section className="bg-surface border border-border/20 rounded-2xl p-5">
+						<h2 className="font-semibold text-foreground mb-1 flex items-center gap-2">
+							<Radio className="w-4 h-4 text-rose-400" />
+							Live streaming
+						</h2>
+						<p className="text-xs text-muted mb-3">
+							Review and accept stream guidelines before going live.
+						</p>
 						<Button
 							variant="outline"
 							fullWidth
-							onClick={() => { void navigate('/delete-account-request'); }}
-							className="border-red-500/25 text-red-300 hover:border-red-500/40 hover:bg-red-500/10"
+							onClick={() => setShowGuidelines(true)}
 						>
-							Request account deletion
+							View stream guidelines
 						</Button>
-						<Button
-							variant="danger"
-							fullWidth
-							onClick={handleLogout}
-							leftIcon={<LogOut className="w-4 h-4" />}
-						>
-							Sign Out
-						</Button>
-					</div>
-				</section>
+					</section>
+				)}
+
+				<SettingsDangerZone
+					deleteStatus={deleteStatus}
+					scheduledDeleteAt={scheduledDeleteAt}
+					deleteLoading={deleteLoading}
+					onManageDeletion={() => { void navigate('/delete-account'); }}
+					onExport={() => {
+						void exportData()
+							.then(res => showToast(`Export started (job ${res.jobId})`))
+							.catch(err => showToast(apiErrorMessage(err, 'Export failed'), 'error'));
+					}}
+					onSignOut={handleLogout}
+				/>
 			</div>
+			<StreamGuidelinesModal
+				isOpen={showGuidelines}
+				onClose={() => setShowGuidelines(false)}
+			/>
 		</Layout>
 	);
 }
