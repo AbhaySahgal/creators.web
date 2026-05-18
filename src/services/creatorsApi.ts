@@ -1,4 +1,12 @@
 import type { User } from '../types';
+import {
+	normalizePayoutBalance,
+	normalizePayoutHistory,
+	normalizePayoutWithdraw,
+	type PayoutBalance,
+	type PayoutHistory,
+	type PayoutWithdrawResult,
+} from './payoutTypes';
 import { getSessionToken, setSessionToken } from './sessionToken';
 
 export type PreferredRole = 'fan' | 'creator';
@@ -361,6 +369,25 @@ export const creatorsApi = {
 			},
 			update(body: UpdateNotificationSettingsRequest): Promise<UpdateNotificationSettingsResponse> {
 				return requestJson<UpdateNotificationSettingsResponse>('/me/notification-settings', { method: 'PUT', body, auth: true });
+			},
+		},
+		payouts: {
+			balance(signal?: AbortSignal): Promise<PayoutBalance> {
+				return requestJson<unknown>('/me/payouts/balance', { method: 'GET', auth: true, signal })
+					.then(normalizePayoutBalance);
+			},
+			withdraw(body: { amountCents: string }): Promise<PayoutWithdrawResult> {
+				return requestJson<unknown>('/me/payouts/withdraw', { method: 'POST', body, auth: true })
+					.then(normalizePayoutWithdraw);
+			},
+			history(params?: { limit?: number, before?: string }, signal?: AbortSignal): Promise<PayoutHistory> {
+				const q = new URLSearchParams();
+				if (params?.limit != null) q.set('limit', String(params.limit));
+				if (params?.before?.trim()) q.set('before', params.before.trim());
+				const qs = q.toString();
+				const path = qs ? `/me/payouts/history?${qs}` : '/me/payouts/history';
+				return requestJson<unknown>(path, { method: 'GET', auth: true, signal })
+					.then(normalizePayoutHistory);
 			},
 		},
 	},

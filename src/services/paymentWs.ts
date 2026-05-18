@@ -1,4 +1,12 @@
 import type { WsClient } from './wsClient';
+import {
+	normalizePayoutBalance,
+	normalizePayoutHistory,
+	normalizePayoutWithdraw,
+	type PayoutBalance,
+	type PayoutHistory,
+	type PayoutWithdrawResult,
+} from './payoutTypes';
 
 export interface PaymentBalanceResponse {
 	walletId: string;
@@ -115,6 +123,22 @@ export function createPaymentWs(client: WsClient) {
 			const pid = String(postId ?? '').trim();
 			if (pid) args.push(pid);
 			return client.request(SVC, 'tip', args) as Promise<PaymentTipResponse>;
+		},
+		payoutBalance(): Promise<PayoutBalance> {
+			return client.request(SVC, 'payoutbalance', []).then(json => normalizePayoutBalance(json));
+		},
+		withdraw(amountCents: string): Promise<PayoutWithdrawResult> {
+			const amount = String(amountCents ?? '').trim();
+			if (!/^\d+$/.test(amount) || BigInt(amount) <= 0n) {
+				throw new Error('amountCents must be a positive integer string');
+			}
+			return client.request(SVC, 'withdraw', [amount]).then(json => normalizePayoutWithdraw(json));
+		},
+		payoutHistory(limit?: number, before?: string): Promise<PayoutHistory> {
+			const args: string[] = [];
+			if (limit != null) args.push(String(limit));
+			if (before?.trim()) args.push(before.trim());
+			return client.request(SVC, 'payouthistory', args).then(json => normalizePayoutHistory(json));
 		},
 	};
 }
