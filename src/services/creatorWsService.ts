@@ -1,6 +1,7 @@
 import type { CreatorsMultiplexWs } from './creatorsMultiplexWs';
 import type { WsClient } from './wsClient';
 import type { CreatorGetResponse, CreatorListResponse, CreatorUpsertResponse } from './creatorWsTypes';
+import type { ContentStreamsResponse } from './postsTypes';
 
 export interface CreatorFollowResponse {
 	ok: true;
@@ -102,4 +103,25 @@ export function creatorUnfollow(ws: WsClient, creatorUserId: string, requestId?:
 	const rid = requestId?.trim() || undefined;
 	if (rid && /\s/.test(rid)) throw new Error('requestId must not contain spaces');
 	return ws.request('creator', 'unfollow', [id], rid).then(json => json as CreatorUnfollowResponse);
+}
+
+/** `> creator …\n/contentstreams [limit] [before]` */
+export function buildContentStreamsCommand(opts?: { limit?: number, before?: string }): string {
+	const lim = Math.min(50, Math.max(1, opts?.limit ?? 30));
+	const parts: string[] = ['/contentstreams', String(lim)];
+	if (opts?.before?.trim()) parts.push(opts.before.trim());
+	return parts.join(' ');
+}
+
+export function creatorContentStreams(
+	ws: WsClient,
+	opts?: { limit?: number, before?: string },
+	requestId?: string
+): Promise<ContentStreamsResponse> {
+	const line = buildContentStreamsCommand(opts);
+	const trimmed = line.trim();
+	const parts = trimmed.split(' ');
+	const command = parts[0].slice(1);
+	const args = parts.slice(1);
+	return ws.request('creator', command, args, requestId).then(json => json as ContentStreamsResponse);
 }

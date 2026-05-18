@@ -7,6 +7,13 @@ export interface CreatorDisplay {
 	username: string;
 }
 
+/** Media row exists but URL empty until transcode/scan completes. */
+export function isPostMediaPending(dto: PostDTO): boolean {
+	const m = dto.media?.[0];
+	if (!m?.type) return false;
+	return !(m.url ?? '').trim();
+}
+
 export function postDtoToPost(
 	dto: PostDTO,
 	creator: CreatorDisplay | undefined,
@@ -23,8 +30,12 @@ export function postDtoToPost(
 	let thumbnailUrl: string | undefined;
 	if (media0) {
 		type = media0.type === 'video' ? 'video' : 'image';
-		mediaUrl = media0.url;
+		const url = (media0.url ?? '').trim();
+		if (url) mediaUrl = url;
+		const thumb = media0.thumbnail_url;
+		if (typeof thumb === 'string' && thumb.trim()) thumbnailUrl = thumb.trim();
 	}
+	const mediaPending = isPostMediaPending(dto);
 	const name = creator?.name ?? 'Creator';
 	const avatar = creator?.avatar ?? '';
 	const username = creator?.username ?? 'creator';
@@ -52,6 +63,7 @@ export function postDtoToPost(
 		createdAt: dto.created_at,
 		isPinned: partial?.isPinned ?? false,
 		unlockedBy: partial?.unlockedBy ?? [],
+		mediaPending,
 	};
 }
 

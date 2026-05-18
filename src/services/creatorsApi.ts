@@ -1,4 +1,5 @@
 import type { User } from '../types';
+import type { ContentStreamsResponse, PostInsightsResponse } from './postsTypes';
 import { getSessionToken, setSessionToken } from './sessionToken';
 
 export type PreferredRole = 'fan' | 'creator';
@@ -416,6 +417,24 @@ export const creatorsApi = {
 		getById(id: string, signal?: AbortSignal): Promise<CreatorProfileResponse> {
 			return requestJson<unknown>(`/creators/${encodeURIComponent(id)}`, { method: 'GET', signal })
 				.then(normalizeCreatorProfileResponse);
+		},
+	},
+	posts: {
+		insights(postId: string, signal?: AbortSignal): Promise<PostInsightsResponse> {
+			return requestJson<PostInsightsResponse>(
+				`/posts/${encodeURIComponent(postId)}/insights`,
+				{ method: 'GET', auth: true, signal }
+			);
+		},
+	},
+	content: {
+		streams(opts?: { limit?: number, before?: string }, signal?: AbortSignal): Promise<ContentStreamsResponse> {
+			const params = new URLSearchParams();
+			if (opts?.limit != null) params.set('limit', String(opts.limit));
+			if (opts?.before) params.set('before', opts.before);
+			const q = params.toString();
+			const path = q ? `/me/content/streams?${q}` : '/me/content/streams';
+			return requestJson<ContentStreamsResponse>(path, { method: 'GET', auth: true, signal });
 		},
 	},
 	reports: {

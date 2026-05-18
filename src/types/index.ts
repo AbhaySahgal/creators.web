@@ -175,6 +175,8 @@ export interface Post {
 	createdAt: string;
 	isPinned: boolean;
 	unlockedBy: string[];
+	/** True when post has media assets but URLs are not ready yet (awaiting `posts|updated`). */
+	mediaPending?: boolean;
 }
 
 export interface Comment {
