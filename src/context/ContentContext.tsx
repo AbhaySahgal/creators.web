@@ -3,6 +3,7 @@ import React, {
 	useCallback,
 	useContext,
 	useEffect,
+	useMemo,
 	useReducer,
 	useRef,
 } from 'react';
@@ -32,6 +33,16 @@ import {
 	postDtoToPost,
 } from '../services/postDtoMap';
 import { useAuth } from './AuthContext';
+import { useSubscriptions } from './SubscriptionContext';
+import { subscriptionCreatorUserId, type SubscriptionDTO } from '../services/subscriptionUi';
+import {
+	CATALOG_HYDRATE_CONCURRENCY,
+	MAX_DISCOVER_CREATORS,
+	creatorIdsFromPostIds,
+	mergeDisplayPosts,
+	runBatched,
+	uniqueCreatorIds,
+} from '../services/postsBootstrap';
 
 export type PostsWsStatus = 'idle' | 'connecting' | 'ready' | 'error';
 
@@ -49,8 +60,12 @@ interface ContentState {
 	postsWsError: string | null;
 	feedNextCursor: string | null;
 	exploreNextCursor: string | null;
+	/** Ordered post ids from `/list feed` for the home Feed screen (includes locked PPV/subscriber teasers). */
+	feedPostIds: string[];
 	/** Ordered post ids from `/list explore` for the Explore screen. */
 	explorePostIds: string[];
+	/** Creators whose full catalog was fetched via `/list creator` during bootstrap or targeted refresh. */
+	catalogHydratedCreatorIds: string[];
 	/** Per-post next cursor for `/comments` pagination; key missing until first fetch; `null` = no more pages. */
 	commentPagination: Record<string, string | null>;
 	creatorCursors: Record<string, string | null>;
@@ -75,14 +90,16 @@ type ContentAction =
 	{ type: 'SUBSCRIBE', payload: string } |
 	{ type: 'UNSUBSCRIBE', payload: string } |
 	{ type: 'UPDATE_POST', payload: Partial<Post> & { id: string } } |
-	{ type: 'MERGE_POSTS_LIST', payload: { posts: Post[], nextCursor: string | null, listKind: 'feed' | 'explore' | 'creator', creatorId?: string, replaceExploreOrder?: boolean } } |
+	{ type: 'MERGE_POSTS_LIST', payload: { posts: Post[], nextCursor: string | null, listKind: 'feed' | 'explore' | 'creator', creatorId?: string, replaceExploreOrder?: boolean, replaceFeedOrder?: boolean } } |
 	{ type: 'SET_POST_COMMENTS', payload: { postId: string, comments: Comment[], nextCursor: string | null, mode: 'replace' | 'append' } } |
 	{ type: 'SET_WS', payload: { status: PostsWsStatus, error?: string | null } } |
 	{ type: 'SET_CREATOR_PROFILES', payload: Record<string, CreatorDisplay> } |
 	{ type: 'HYDRATE_SAVED_FROM_LIST', payload: { posts: Post[] } } |
 	{ type: 'SET_SAVED_PAGE_FEED', payload: { posts: Post[], nextCursor: string | null, mode: 'replace' | 'append' } } |
 	{ type: 'PATCH_SAVED_ID', payload: { postId: string, saved: boolean } } |
-	{ type: 'CLEAR_SAVED_LOCAL' };
+	{ type: 'CLEAR_SAVED_LOCAL' } |
+	{ type: 'SET_CATALOG_HYDRATED', payload: { creatorIds: string[] } } |
+	{ type: 'RESET_POSTS_BOOTSTRAP' };
 
 const initialState: ContentState = {
 	posts: [],
@@ -91,7 +108,9 @@ const initialState: ContentState = {
 	postsWsError: null,
 	feedNextCursor: null,
 	exploreNextCursor: null,
+	feedPostIds: [],
 	explorePostIds: [],
+	catalogHydratedCreatorIds: [],
 	commentPagination: {},
 	creatorCursors: {},
 	creatorProfiles: {},
@@ -214,13 +233,19 @@ function contentReducer(state: ContentState, action: ContentAction): ContentStat
 			};
 		}
 		case 'UNLOCK_POST': {
+			const { postId, userId } = action.payload;
 			return {
 				...state,
-				posts: state.posts.map(p =>
-					p.id === action.payload.postId ?
-						{ ...p, unlockedBy: [...p.unlockedBy, action.payload.userId] } :
-						p
-				),
+				posts: state.posts.map(p => {
+					if (p.id !== postId) return p;
+					const nextUnlocked = p.unlockedBy.includes(userId) ? p.unlockedBy : [...p.unlockedBy, userId];
+					return {
+						...p,
+						unlockedBy: nextUnlocked,
+						isUnlockedForViewer: true,
+						isLocked: false,
+					};
+				}),
 			};
 		}
 		case 'ADD_POST': {
@@ -247,6 +272,7 @@ function contentReducer(state: ContentState, action: ContentAction): ContentStat
 			return {
 				...state,
 				posts: state.posts.filter(p => p.id !== pid),
+				feedPostIds: state.feedPostIds.filter(id => id !== pid),
 				explorePostIds: state.explorePostIds.filter(id => id !== pid),
 				commentPagination: restPagination,
 				savedPostIds: nextSavedIds,
@@ -272,7 +298,7 @@ function contentReducer(state: ContentState, action: ContentAction): ContentStat
 			};
 		}
 		case 'MERGE_POSTS_LIST': {
-			const { posts: incoming, nextCursor, listKind, creatorId, replaceExploreOrder } = action.payload;
+			const { posts: incoming, nextCursor, listKind, creatorId, replaceExploreOrder, replaceFeedOrder } = action.payload;
 			const byId: Record<string, Post> = {};
 			for (const p of state.posts) {
 				byId[p.id] = p;
@@ -294,6 +320,11 @@ function contentReducer(state: ContentState, action: ContentAction): ContentStat
 				mergedList.push(byId[k]);
 			});
 			const incomingIds = incoming.map(p => p.id);
+			const feedPostIds = listKind === 'feed' ?
+				(replaceFeedOrder ?
+					incomingIds :
+					[...state.feedPostIds, ...incomingIds.filter(id => !state.feedPostIds.includes(id))]) :
+				state.feedPostIds;
 			const explorePostIds = listKind === 'explore' ?
 				(replaceExploreOrder ?
 					incomingIds :
@@ -304,6 +335,7 @@ function contentReducer(state: ContentState, action: ContentAction): ContentStat
 				posts: sortPostsNewestFirst(mergedList),
 				feedNextCursor: listKind === 'feed' ? nextCursor : state.feedNextCursor,
 				exploreNextCursor: listKind === 'explore' ? nextCursor : state.exploreNextCursor,
+				feedPostIds,
 				explorePostIds,
 				creatorCursors: creatorId ?
 					{ ...state.creatorCursors, [creatorId]: nextCursor } :
@@ -406,6 +438,19 @@ function contentReducer(state: ContentState, action: ContentAction): ContentStat
 				savedFeedNextCursor: null,
 			};
 		}
+		case 'SET_CATALOG_HYDRATED': {
+			const merged = uniqueCreatorIds([
+				...state.catalogHydratedCreatorIds,
+				...action.payload.creatorIds,
+			]);
+			return { ...state, catalogHydratedCreatorIds: merged };
+		}
+		case 'RESET_POSTS_BOOTSTRAP': {
+			return {
+				...initialState,
+				creatorProfiles: state.creatorProfiles,
+			};
+		}
 		default:
 			return state;
 	}
@@ -415,6 +460,12 @@ interface ContentContextValue {
 	state: ContentState;
 	/** Multiplex WebSocket status (feed + chat share this connection when not in posts mock mode). */
 	postsWsStatus: PostsWsStatus;
+	/** Fan-facing posts bootstrap readiness (alias of `postsWsStatus`). */
+	postsBootstrapStatus: PostsWsStatus;
+	/** Feed "All" tab: list feed order + gated posts from hydrated creator catalogs. */
+	feedDisplayPosts: Post[];
+	/** Explore discover posts: list explore order + gated posts from hydrated catalogs. */
+	exploreDisplayPosts: Post[];
 	toggleLike: (postId: string, userId: string) => Promise<void>;
 	addComment: (postId: string, text: string) => Promise<void>;
 	addReply: (postId: string, parentCommentId: string, text: string) => Promise<void>;
@@ -431,6 +482,8 @@ interface ContentContextValue {
 	updatePost: (post: Partial<Post> & { id: string }) => Promise<void>;
 	loadMoreFeed: () => Promise<void>;
 	refreshFeed: () => Promise<void>;
+	/** Re-list feed and optionally hydrate one creator catalog (e.g. after subscribe). */
+	refreshFeedAndCatalog: (creatorUserId?: string) => Promise<void>;
 	loadMoreExplore: () => Promise<void>;
 	refreshExplore: () => Promise<void>;
 	loadCreatorPosts: (creatorUserId: string, reset?: boolean) => Promise<void>;
@@ -470,7 +523,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 	const creatorUserInflightRef = useRef<Partial<Record<string, Promise<void>>>>({});
 	const creatorBootstrapRef = useRef<{ userId: string, username: string } | null>(null);
 	const initialWsPostsLoadedKeyRef = useRef<string | null>(null);
+	const catalogHydrateKeyRef = useRef<string | null>(null);
+	const catalogHydratedRef = useRef<Record<string, true>>({});
 	const savedListBootstrapKeyRef = useRef<string | null>(null);
+	const { activeByCreatorUserId } = useSubscriptions();
+	const activeSubCreatorIdsRef = useRef<string[]>([]);
+	activeSubCreatorIdsRef.current = Object.keys(activeByCreatorUserId);
 
 	const creatorWsDebugEnabled = useCallback((): boolean => {
 		if (!import.meta.env.DEV) return false;
@@ -702,60 +760,14 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 		};
 	}, [ws, wsConnected, handlePush]);
 
-	// Spec-based bootstrapping for feed/explore (and my creator posts).
-	useEffect(() => {
-		const key = authState.user ? `${authState.user.role}:${authState.user.id}` : 'guest';
-		if (!wsConnected) {
-			dispatch({ type: 'SET_WS', payload: { status: 'connecting' } });
-			return;
-		}
-		if (!wsAuthReady) return;
-		if (initialWsPostsLoadedKeyRef.current === key) return;
-		initialWsPostsLoadedKeyRef.current = key;
-
-		dispatch({ type: 'SET_WS', payload: { status: 'ready', error: null } });
-
-		const feedP = wsRequestLine('posts', '/list feed 30')
-			.then(json => mapList(json).then(posts => {
-				const body = json as ListPostsResponse;
-				dispatch({
-					type: 'MERGE_POSTS_LIST',
-					payload: { posts, nextCursor: body.nextCursor ?? null, listKind: 'feed' },
-				});
-			}));
-
-		const exploreP = wsRequestLine('posts', '/list explore 30')
-			.then(json => mapList(json).then(posts => {
-				const body = json as ListPostsResponse;
-				dispatch({
-					type: 'MERGE_POSTS_LIST',
-					payload: { posts, nextCursor: body.nextCursor ?? null, listKind: 'explore', replaceExploreOrder: true },
-				});
-			}));
-
-		const u = authUserRef.current;
-		const myId = u?.id;
-		const canHaveOwnPosts = u?.role === 'creator' || u?.role === 'admin';
-		const creatorP = myId && canHaveOwnPosts ?
-			wsRequestLine('posts', `/list creator ${myId} 30`)
-				.then(json => mapList(json).then(posts => {
-					const body = json as ListPostsResponse;
-					dispatch({
-						type: 'MERGE_POSTS_LIST',
-						payload: { posts, nextCursor: body.nextCursor ?? null, listKind: 'creator', creatorId: myId },
-					});
-				})) :
-			Promise.resolve();
-
-		void Promise.all([feedP, exploreP, creatorP]).catch(e => {
-			dispatch({ type: 'SET_WS', payload: { status: 'error', error: e instanceof Error ? e.message : String(e) } });
-		});
-	}, [wsConnected, wsAuthReady, wsRequestLine, mapList, authState.user]);
-
-	// Clear saved state when logging out.
+	// Clear posts bootstrap + saved state when logging out.
 	useEffect(() => {
 		if (authState.user?.id) return;
+		initialWsPostsLoadedKeyRef.current = null;
+		catalogHydrateKeyRef.current = null;
+		catalogHydratedRef.current = {};
 		savedListBootstrapKeyRef.current = null;
+		dispatch({ type: 'RESET_POSTS_BOOTSTRAP' });
 		dispatch({ type: 'CLEAR_SAVED_LOCAL' });
 	}, [authState.user?.id]);
 
@@ -918,7 +930,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 		return wsRequestLine('posts', '/list feed 30')
 			.then(json => mapList(json).then(posts => {
 				const body = json as ListPostsResponse;
-				dispatch({ type: 'MERGE_POSTS_LIST', payload: { posts, nextCursor: body.nextCursor ?? null, listKind: 'feed' } });
+				dispatch({
+					type: 'MERGE_POSTS_LIST',
+					payload: { posts, nextCursor: body.nextCursor ?? null, listKind: 'feed', replaceFeedOrder: true },
+				});
 			}))
 			.catch(e => {
 				dispatch({ type: 'SET_WS', payload: { status: 'error', error: e instanceof Error ? e.message : String(e) } });
@@ -981,10 +996,175 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 					});
 				}))
 				.catch(() => {
-					/* Saved feed errors are non-fatal; avoid clobbering global posts WS status. */
+					/* Catalog hydrate errors are non-fatal; avoid clobbering global posts WS status. */
 				});
 		},
 		[mapList, wsRequestLine]
+	);
+
+	const computeDiscoverCreatorIds = useCallback((): string[] => {
+		const s = stateRef.current;
+		const fromFeed = creatorIdsFromPostIds(s.feedPostIds, s.posts);
+		const fromExplore = creatorIdsFromPostIds(s.explorePostIds, s.posts);
+		const fromSubs = activeSubCreatorIdsRef.current;
+		return uniqueCreatorIds([...fromFeed, ...fromExplore, ...fromSubs]).slice(0, MAX_DISCOVER_CREATORS);
+	}, []);
+
+	const computeDiscoverCreatorIdsAsync = useCallback((): Promise<string[]> => {
+		const base = computeDiscoverCreatorIds();
+		return creatorWsSearch({ limit: 30 })
+			.then(r => {
+				const dir = r.creators.map(c => String(c.user_id));
+				return uniqueCreatorIds([...base, ...dir]).slice(0, MAX_DISCOVER_CREATORS);
+			})
+			.catch(() => base);
+	}, [computeDiscoverCreatorIds, creatorWsSearch]);
+
+	const hydrateCreatorCatalogs = useCallback(
+		(creatorIds: string[], opts?: { force?: boolean }) => {
+			const ids = uniqueCreatorIds(creatorIds).filter(id =>
+				opts?.force ? true : !catalogHydratedRef.current[id]
+			);
+			if (ids.length === 0) return Promise.resolve();
+			return runBatched(ids, CATALOG_HYDRATE_CONCURRENCY, id =>
+				loadCreatorPosts(id, true).then(() => {
+					catalogHydratedRef.current = { ...catalogHydratedRef.current, [id]: true };
+				})
+			).then(() => {
+				dispatch({ type: 'SET_CATALOG_HYDRATED', payload: { creatorIds: ids } });
+			});
+		},
+		[loadCreatorPosts]
+	);
+
+	const refreshFeedAndCatalog = useCallback(
+		(creatorUserId?: string) => {
+			return refreshFeed().then(() => {
+				if (creatorUserId) {
+					const next = { ...catalogHydratedRef.current };
+					delete next[creatorUserId];
+					catalogHydratedRef.current = next;
+					return hydrateCreatorCatalogs([creatorUserId], { force: true });
+				}
+				return computeDiscoverCreatorIdsAsync().then(ids => hydrateCreatorCatalogs(ids));
+			});
+		},
+		[refreshFeed, hydrateCreatorCatalogs, computeDiscoverCreatorIdsAsync]
+	);
+
+	// App-level post-auth bootstrap: Phase 1 list feed/explore, Phase 2 batched creator catalogs.
+	useEffect(() => {
+		const key = authState.user ? `${authState.user.role}:${authState.user.id}` : 'guest';
+		if (!wsConnected) {
+			dispatch({ type: 'SET_WS', payload: { status: 'connecting' } });
+			return;
+		}
+		if (!wsAuthReady) return;
+		if (initialWsPostsLoadedKeyRef.current === key) return;
+		initialWsPostsLoadedKeyRef.current = key;
+
+		dispatch({ type: 'SET_WS', payload: { status: 'connecting', error: null } });
+
+		const u = authUserRef.current;
+		const myId = u?.id;
+		const canHaveOwnPosts = u?.role === 'creator' || u?.role === 'admin';
+
+		const feedP = wsRequestLine('posts', '/list feed 30')
+			.then(json => mapList(json).then(posts => {
+				const body = json as ListPostsResponse;
+				dispatch({
+					type: 'MERGE_POSTS_LIST',
+					payload: { posts, nextCursor: body.nextCursor ?? null, listKind: 'feed', replaceFeedOrder: true },
+				});
+			}));
+
+		const exploreP = wsRequestLine('posts', '/list explore 30')
+			.then(json => mapList(json).then(posts => {
+				const body = json as ListPostsResponse;
+				dispatch({
+					type: 'MERGE_POSTS_LIST',
+					payload: { posts, nextCursor: body.nextCursor ?? null, listKind: 'explore', replaceExploreOrder: true },
+				});
+			}));
+
+		const creatorP = myId && canHaveOwnPosts ?
+			wsRequestLine('posts', `/list creator ${myId} 30`)
+				.then(json => mapList(json).then(posts => {
+					const body = json as ListPostsResponse;
+					dispatch({
+						type: 'MERGE_POSTS_LIST',
+						payload: { posts, nextCursor: body.nextCursor ?? null, listKind: 'creator', creatorId: myId },
+					});
+				})) :
+			Promise.resolve();
+
+		void Promise.all([feedP, exploreP, creatorP])
+			.then(() => computeDiscoverCreatorIdsAsync())
+			.then(discoverIds => {
+				const hydrateKey = discoverIds.slice().sort().join(',');
+				if (catalogHydrateKeyRef.current === hydrateKey) return;
+				catalogHydrateKeyRef.current = hydrateKey;
+				return hydrateCreatorCatalogs(discoverIds);
+			})
+			.then(() => {
+				dispatch({ type: 'SET_WS', payload: { status: 'ready', error: null } });
+			})
+			.catch(e => {
+				dispatch({
+					type: 'SET_WS',
+					payload: { status: 'error', error: e instanceof Error ? e.message : String(e) },
+				});
+			});
+	}, [
+		wsConnected,
+		wsAuthReady,
+		wsRequestLine,
+		mapList,
+		authState.user,
+		computeDiscoverCreatorIdsAsync,
+		hydrateCreatorCatalogs,
+	]);
+
+	// When subscriptions load after bootstrap, hydrate catalogs for newly active creators.
+	useEffect(() => {
+		if (state.postsWsStatus !== 'ready') return;
+		const subIds = Object.keys(activeByCreatorUserId);
+		const pending = subIds.filter(id => !catalogHydratedRef.current[id]);
+		if (pending.length === 0) return;
+		void hydrateCreatorCatalogs(pending);
+	}, [state.postsWsStatus, activeByCreatorUserId, hydrateCreatorCatalogs]);
+
+	// When a subscription is created, refresh feed unlock flags and hydrate that creator's catalog.
+	useEffect(() => {
+		if (!wsConnected) return;
+		const services = ['subscription', 'subscriptions'] as const;
+		const offs = services.map(svc =>
+			ws.on(svc, 'created', data => {
+				const dto = data as SubscriptionDTO;
+				const cid = subscriptionCreatorUserId(dto);
+				if (cid) {
+					const next = { ...catalogHydratedRef.current };
+					delete next[cid];
+					catalogHydratedRef.current = next;
+					void refreshFeedAndCatalog(cid);
+				} else {
+					void refreshFeed();
+				}
+			})
+		);
+		return () => {
+			offs.forEach(off => off());
+		};
+	}, [ws, wsConnected, refreshFeed, refreshFeedAndCatalog]);
+
+	const feedDisplayPosts = useMemo(
+		() => mergeDisplayPosts(state.feedPostIds, state.posts, state.catalogHydratedCreatorIds),
+		[state.feedPostIds, state.posts, state.catalogHydratedCreatorIds]
+	);
+
+	const exploreDisplayPosts = useMemo(
+		() => mergeDisplayPosts(state.explorePostIds, state.posts, state.catalogHydratedCreatorIds),
+		[state.explorePostIds, state.posts, state.catalogHydratedCreatorIds]
 	);
 
 	const mapCommentList = useCallback(
@@ -1240,6 +1420,9 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 			value={{
 				state,
 				postsWsStatus: state.postsWsStatus,
+				postsBootstrapStatus: state.postsWsStatus,
+				feedDisplayPosts,
+				exploreDisplayPosts,
 				toggleLike,
 				addComment,
 				addReply,
@@ -1256,6 +1439,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				updatePost,
 				loadMoreFeed,
 				refreshFeed,
+				refreshFeedAndCatalog,
 				loadMoreExplore,
 				refreshExplore,
 				loadCreatorPosts,

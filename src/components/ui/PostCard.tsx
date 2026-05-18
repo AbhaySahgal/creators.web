@@ -25,7 +25,6 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 	const { state: authState } = useAuth();
 	const {
 		toggleLike,
-		isSubscribed,
 		loadPostComments,
 		editPost,
 		reportPost,
@@ -52,9 +51,9 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 
 	const userId = authState.user?.id ?? '';
 	const isLiked = post.likedBy.includes(userId);
-	const isSubscribedToCreator = isSubscribed(post.creatorId);
 	const isOwner = userId === post.creatorId;
-	const isContentVisible = isOwner || !post.isLocked || (post.isPPV && post.unlockedBy.includes(userId)) || (!post.isPPV && isSubscribedToCreator);
+	/** B6: full body + media only when server says so (or post author). */
+	const isContentVisible = isOwner || post.isUnlockedForViewer === true;
 
 	const commentNext = contentState.commentPagination[post.id];
 	const commentCountShown = Math.max(post.commentCount, post.comments.length);
@@ -196,8 +195,20 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 			<div className="flex items-center justify-between px-4 pt-4 pb-3">
 				<button type="button" onClick={handleCreatorClick} className="flex items-center gap-3 group">
 					<Avatar src={post.creatorAvatar} alt={post.creatorName} size="md" />
-					<div className="text-left">
-						<p className="text-sm font-semibold text-foreground group-hover:text-rose-500 transition-colors">{post.creatorName}</p>
+					<div className="text-left min-w-0">
+						<div className="flex items-center gap-2 flex-wrap">
+							<p className="text-sm font-semibold text-foreground group-hover:text-rose-500 transition-colors">{post.creatorName}</p>
+							{!isContentVisible && post.isPPV && (
+								<span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25">
+									PPV
+								</span>
+							)}
+							{!isContentVisible && !post.isPPV && post.isLocked && (
+								<span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-rose-500/15 text-rose-400 border border-rose-500/25">
+									Members
+								</span>
+							)}
+						</div>
 						<p className="text-xs text-muted">@{post.creatorUsername} · {formatDistanceToNow(post.createdAt)}</p>
 					</div>
 				</button>
@@ -256,7 +267,7 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 				</div>
 			</div>
 
-			{post.text && (
+			{post.text && isContentVisible && (
 				<p className="px-4 pb-3 text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap line-clamp-4">
 					{tokenizeHashtags(post.text).map((t, i) =>
 						t.type === 'hashtag' ? (
@@ -275,10 +286,14 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 				</p>
 			)}
 
-			{post.type !== 'text' && post.mediaUrl && (
+			{post.text && !isContentVisible && post.type !== 'text' && (
+				<p className="px-4 pb-2 text-xs text-muted italic">Caption hidden until you unlock this post.</p>
+			)}
+
+			{post.type !== 'text' && (post.mediaUrl || post.thumbnailUrl) && (
 				<div className="relative">
 					<img
-						src={post.mediaUrl}
+						src={isContentVisible ? (post.mediaUrl ?? post.thumbnailUrl) : (post.thumbnailUrl ?? post.mediaUrl)}
 						alt="Post content"
 						className={`w-full object-cover max-h-[480px] ${!isContentVisible ? 'filter blur-xl scale-105' : ''} transition-all duration-500`}
 						style={{ aspectRatio: '4/3' }}
@@ -292,6 +307,7 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 										<p className="text-foreground font-semibold text-sm mb-1">Pay-per-view</p>
 										<p className="text-muted text-xs mb-3">Unlock this post for {post.ppvPrice != null ? formatINR(post.ppvPrice) : '—'}</p>
 										<button
+											type="button"
 											onClick={() => setShowPPVModal(true)}
 											className="w-full bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
 										>
@@ -300,7 +316,7 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 									</>
 								) : (
 									<>
-										<p className="text-foreground font-semibold text-sm mb-1">Subscriber Only</p>
+										<p className="text-foreground font-semibold text-sm mb-1">Subscriber only</p>
 										<p className="text-muted text-xs mb-3">Subscribe to view this content</p>
 										<button
 											type="button"
@@ -314,6 +330,39 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 							</div>
 						</div>
 					)}
+				</div>
+			)}
+
+			{post.type === 'text' && !isContentVisible && (post.isLocked || post.isPPV) && (
+				<div className="px-4 pb-3">
+					<div className="rounded-xl border border-border/20 bg-foreground/[0.03] p-4 flex flex-col items-center text-center gap-2">
+						<Lock className="w-6 h-6 text-rose-400" />
+						{post.isPPV ? (
+							<>
+								<p className="text-foreground font-semibold text-sm">Pay-per-view</p>
+								<p className="text-muted text-xs">Unlock to read this post{post.ppvPrice != null ? ` — ${formatINR(post.ppvPrice)}` : ''}</p>
+								<button
+									type="button"
+									onClick={() => setShowPPVModal(true)}
+									className="mt-1 w-full max-w-[220px] bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+								>
+									Unlock{post.ppvPrice != null ? ` for ${formatINR(post.ppvPrice)}` : ''}
+								</button>
+							</>
+						) : (
+							<>
+								<p className="text-foreground font-semibold text-sm">Subscriber only</p>
+								<p className="text-muted text-xs">Subscribe on the creator profile to read this post.</p>
+								<button
+									type="button"
+									onClick={() => { void navigate(`/creator/${post.creatorId}`); }}
+									className="mt-1 w-full max-w-[220px] bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+								>
+									Subscribe
+								</button>
+							</>
+						)}
+					</div>
 				</div>
 			)}
 

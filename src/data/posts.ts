@@ -38,6 +38,7 @@ export const mockPosts: Post[] = [
 		createdAt: '2026-03-26T07:00:00Z',
 		isPinned: true,
 		unlockedBy: [],
+		isUnlockedForViewer: true,
 	},
 	{
 		id: 'post-2',
@@ -58,6 +59,7 @@ export const mockPosts: Post[] = [
 		createdAt: '2026-03-25T14:00:00Z',
 		isPinned: false,
 		unlockedBy: ['fan-2'],
+		isUnlockedForViewer: false,
 	},
 	{
 		id: 'post-3',
@@ -78,6 +80,7 @@ export const mockPosts: Post[] = [
 		createdAt: '2026-03-24T16:30:00Z',
 		isPinned: false,
 		unlockedBy: [],
+		isUnlockedForViewer: false,
 	},
 	{
 		id: 'post-4',
@@ -107,6 +110,7 @@ export const mockPosts: Post[] = [
 		createdAt: '2026-03-26T06:00:00Z',
 		isPinned: true,
 		unlockedBy: [],
+		isUnlockedForViewer: true,
 	},
 	{
 		id: 'post-5',
@@ -127,6 +131,7 @@ export const mockPosts: Post[] = [
 		createdAt: '2026-03-25T11:00:00Z',
 		isPinned: false,
 		unlockedBy: [],
+		isUnlockedForViewer: false,
 	},
 	{
 		id: 'post-6',
@@ -155,6 +160,7 @@ export const mockPosts: Post[] = [
 		createdAt: '2026-03-26T08:00:00Z',
 		isPinned: false,
 		unlockedBy: [],
+		isUnlockedForViewer: true,
 	},
 	{
 		id: 'post-7',
@@ -184,6 +190,7 @@ export const mockPosts: Post[] = [
 		createdAt: '2026-03-26T05:00:00Z',
 		isPinned: true,
 		unlockedBy: [],
+		isUnlockedForViewer: true,
 	},
 	{
 		id: 'post-8',
@@ -204,6 +211,7 @@ export const mockPosts: Post[] = [
 		createdAt: '2026-03-25T20:00:00Z',
 		isPinned: false,
 		unlockedBy: [],
+		isUnlockedForViewer: false,
 	},
 	{
 		id: 'post-9',
@@ -223,6 +231,7 @@ export const mockPosts: Post[] = [
 		createdAt: '2026-03-25T15:00:00Z',
 		isPinned: false,
 		unlockedBy: [],
+		isUnlockedForViewer: true,
 	},
 	{
 		id: 'post-10',
@@ -242,5 +251,6 @@ export const mockPosts: Post[] = [
 		createdAt: '2026-03-25T16:00:00Z',
 		isPinned: false,
 		unlockedBy: [],
+		isUnlockedForViewer: false,
 	},
 ];

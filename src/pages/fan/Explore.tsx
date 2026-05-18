@@ -17,14 +17,13 @@ const CATEGORIES = ['All', 'Fitness', 'Art', 'Tech', 'Travel', 'Music', 'Food', 
 export function Explore() {
 	const navigate = useNavigate();
 	const [searchParams, setSearchParams] = useSearchParams();
-	const { state: contentState, loadMoreExplore, creatorWsSearch } = useContent();
-	const explorePosts = useMemo(
-		() =>
-			contentState.explorePostIds
-				.map(pid => contentState.posts.find(p => p.id === pid))
-				.filter((p): p is NonNullable<typeof p> => Boolean(p)),
-		[contentState.explorePostIds, contentState.posts]
-	);
+	const {
+		state: contentState,
+		postsBootstrapStatus,
+		exploreDisplayPosts,
+		loadMoreExplore,
+		creatorWsSearch,
+	} = useContent();
 	const [search, setSearch] = useState('');
 	const [debouncedSearch, setDebouncedSearch] = useState('');
 	const [category, setCategory] = useState('All');
@@ -76,9 +75,11 @@ export function Explore() {
 	}, [wsCreators, sortBy]);
 
 	const filteredExplorePosts = useMemo(() => {
-		if (!tagFilter) return explorePosts;
-		return explorePosts.filter(p => textHasHashtag(p.text ?? '', tagFilter));
-	}, [explorePosts, tagFilter]);
+		if (!tagFilter) return exploreDisplayPosts;
+		return exploreDisplayPosts.filter(p => textHasHashtag(p.text ?? '', tagFilter));
+	}, [exploreDisplayPosts, tagFilter]);
+
+	const postsLoading = postsBootstrapStatus === 'connecting' || postsBootstrapStatus === 'idle';
 
 	const trendingCreators = wsCreators.slice(0, 3);
 
@@ -151,10 +152,10 @@ export function Explore() {
 							</button>
 						</div>
 					)}
-					{contentState.postsWsStatus === 'connecting' && (
+					{postsLoading && (
 						<p className="text-xs text-muted">Loading posts…</p>
 					)}
-					{contentState.postsWsStatus === 'error' && contentState.postsWsError && (
+					{postsBootstrapStatus === 'error' && contentState.postsWsError && (
 						<p className="text-xs text-rose-400">{contentState.postsWsError}</p>
 					)}
 					<div className="space-y-4">

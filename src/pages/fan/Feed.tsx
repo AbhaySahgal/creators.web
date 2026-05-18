@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, Zap, Users } from '../../components/icons';
 import { Layout } from '../../components/layout/Layout';
@@ -10,23 +10,29 @@ import { useDragScroll } from '../../hooks/useDragScroll';
 import { useSubscribedCreatorsForFan } from '../../hooks/useSubscribedCreatorsForFan';
 
 export function Feed() {
-	const { state: contentState, loadMoreFeed, refreshFeed } = useContent();
+	const {
+		state: contentState,
+		postsBootstrapStatus,
+		feedDisplayPosts,
+		loadMoreFeed,
+		refreshFeed,
+	} = useContent();
 	const { isSubscribed: isWsSubscribed } = useSubscriptions();
-	const { subscribedCreators, bumpHydrate } = useSubscribedCreatorsForFan();
+	const { subscribedCreators } = useSubscribedCreatorsForFan({ eagerHydrate: false });
 	const navigate = useNavigate();
 	const [filter, setFilter] = useState<'all' | 'subscribed'>('all');
 	const followingRef = useDragScroll();
 
-	useEffect(() => {
-		if (filter !== 'subscribed') return;
-		if (contentState.postsWsStatus !== 'ready') return;
-		bumpHydrate();
-	}, [filter, contentState.postsWsStatus, bumpHydrate]);
+	const posts = useMemo(() => {
+		if (filter === 'subscribed') {
+			return [...contentState.posts]
+				.filter(p => isWsSubscribed(p.creatorId))
+				.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+		}
+		return feedDisplayPosts;
+	}, [filter, feedDisplayPosts, contentState.posts, isWsSubscribed]);
 
-	const posts = contentState.posts.filter(p => {
-		if (filter === 'subscribed') return isWsSubscribed(p.creatorId);
-		return true;
-	});
+	const isConnecting = postsBootstrapStatus === 'connecting' || postsBootstrapStatus === 'idle';
 
 	return (
 		<Layout>
@@ -51,9 +57,6 @@ export function Feed() {
 												className="h-full w-full rounded-full border-2 border-background"
 											/>
 										</div>
-										{creator.isOnline && (
-											<div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-400 border-2 border-background rounded-full" />
-										)}
 									</div>
 									<p className="text-[10px] text-muted w-14 text-center truncate">{creator.name.split(' ')[0]}</p>
 								</button>
@@ -85,13 +88,21 @@ export function Feed() {
 					</div>
 				</div>
 
-				{posts.length === 0 ? (
+				{isConnecting ? (
+					<div className="text-center py-16 text-muted text-sm">Loading your feed…</div>
+				) : posts.length === 0 ? (
 					<div className="text-center py-16">
 						<div className="w-14 h-14 bg-foreground/5 rounded-2xl flex items-center justify-center mx-auto mb-3">
 							<Users className="w-6 h-6 text-muted/60" />
 						</div>
-						<p className="text-muted font-medium mb-1">No posts yet</p>
-						<p className="text-sm text-muted/80 mb-4">Subscribe to creators to see their content here</p>
+						<p className="text-muted font-medium mb-1">
+							{filter === 'subscribed' ? 'No posts from your subscriptions' : 'No posts in your feed yet'}
+						</p>
+						<p className="text-sm text-muted/80 mb-4">
+							{filter === 'subscribed' ?
+								'Posts from creators you subscribe to will appear here.' :
+								'Follow or explore creators to see posts here — PPV and subscriber posts stay locked until you unlock or subscribe.'}
+						</p>
 						<button
 							type="button"
 							onClick={() => { void navigate('/explore'); }}

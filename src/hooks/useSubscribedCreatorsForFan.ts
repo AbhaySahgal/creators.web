@@ -5,14 +5,14 @@ import type { Creator } from '../types';
 
 type Options = {
 	/**
-	 * When true (default), when posts WS is ready, load each subscribed creator's posts once
-	 * (deduped) so `creatorProfiles` hydrates — Feed behavior.
+	 * When true, when posts WS is ready, load each subscribed creator's posts once (deduped).
+	 * Default false — catalog hydration is centralized in ContentProvider bootstrap.
 	 */
 	eagerHydrate?: boolean,
 };
 
 export function useSubscribedCreatorsForFan(options?: Options) {
-	const eagerHydrate = options?.eagerHydrate !== false;
+	const eagerHydrate = options?.eagerHydrate === true;
 	const { state: contentState, loadCreatorPosts } = useContent();
 	const { activeByCreatorUserId } = useSubscriptions();
 	const lastSubscribedLoadKey = useRef('');

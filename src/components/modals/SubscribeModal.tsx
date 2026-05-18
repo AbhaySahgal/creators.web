@@ -15,16 +15,18 @@ interface SubscribeModalProps {
 	isOpen: boolean;
 	onClose: () => void;
 	creator: Creator;
+	/** After server confirms subscription — refresh posts so `is_unlocked_for_viewer` matches API. */
+	onSubscribeSuccess?: () => void | Promise<void>;
 }
 
 const PERKS = [
-	'Access to all subscriber-only posts',
+	'Access to subscriber-only posts (PPV unlocks are separate)',
 	'Direct messaging with creator',
 	'Early access to new content',
 	'Exclusive behind-the-scenes content',
 ];
 
-export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps) {
+export function SubscribeModal({ isOpen, onClose, creator, onSubscribeSuccess }: SubscribeModalProps) {
 	const { state: authState } = useAuth();
 	const { showToast } = useNotifications();
 	const { subscribeWallet } = useSubscriptions();
@@ -57,6 +59,7 @@ export function SubscribeModal({ isOpen, onClose, creator }: SubscribeModalProps
 			}
 
 			void subscribeWallet(creator.id, autoRenew)
+				.then(() => Promise.resolve(onSubscribeSuccess?.()))
 				.then(() => {
 					completeSubscription();
 				})

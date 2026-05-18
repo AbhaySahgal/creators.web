@@ -27,7 +27,7 @@ export function CreatorProfile() {
 	const { id: creatorUserId } = useParams<{ id: string }>();
 	const navigate = useNavigate();
 	const { state: authState } = useAuth();
-	const { state: contentState, isSubscribed, loadCreatorPosts, creatorWsGetByUserId } = useContent();
+	const { state: contentState, loadCreatorPosts, creatorWsGetByUserId, refreshFeedAndCatalog } = useContent();
 	const { showToast } = useNotifications();
 	useSession();
 	const { requestSession, state: sessionsState, clearOutgoing } = useSessions();
@@ -213,7 +213,7 @@ export function CreatorProfile() {
 
 	const subDto = getSubscriptionForCreator(creator.id);
 	const subStatus = subDto ? subscriptionUiStatus(subDto) : null;
-	const subscribed = subStatus === 'active' || isSubscribed(creator.id);
+	const subscribed = subStatus === 'active';
 	const subId = subDto ? subscriptionId(subDto) : null;
 	const isOwner = authState.user?.id === creator.id;
 	const creatorForDisplay: Creator = isOwner && authState.user ? {
@@ -526,7 +526,7 @@ export function CreatorProfile() {
 									<Lock className="w-5 h-5 text-rose-400" />
 								</div>
 								<div className="flex-1">
-									<p className="text-sm font-semibold text-foreground dark:text-white mb-0.5">Subscribe to unlock all content</p>
+									<p className="text-sm font-semibold text-foreground dark:text-white mb-0.5">Subscribe for subscriber-only posts</p>
 									<p className="text-xs text-muted dark:text-white/40">{postCountShown} posts · Starting at {formatINR(creatorForDisplay.subscriptionPrice)}/mo</p>
 								</div>
 								<button
@@ -586,6 +586,7 @@ export function CreatorProfile() {
 				isOpen={showSubscribeModal}
 				onClose={() => setShowSubscribeModal(false)}
 				creator={creatorForDisplay}
+				onSubscribeSuccess={() => refreshFeedAndCatalog(creatorUserId)}
 			/>
 			<SessionPickerModal
 				isOpen={showSessionModal}

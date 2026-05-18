@@ -167,6 +167,12 @@ export interface Post {
 	isLocked: boolean;
 	isPPV: boolean;
 	ppvPrice?: number;
+	/** Server B6: viewer may see full post body + signed media URLs. */
+	isUnlockedForViewer?: boolean;
+	/** B6 minor units string when PPV priced. */
+	unlockPriceMinor?: string;
+	/** Server `access_reason` (display/debug only). */
+	accessReason?: string;
 	likes: number;
 	likedBy: string[];
 	comments: Comment[];

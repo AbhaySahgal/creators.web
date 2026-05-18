@@ -1,10 +1,44 @@
 import type { Comment, Post, PostType } from '../types';
-import type { CommentDTO, PostDTO } from './postsTypes';
+import { resolveUnlockPriceMinor, type CommentDTO, type PostDTO } from './postsTypes';
 
 export interface CreatorDisplay {
 	name: string;
 	avatar: string;
 	username: string;
+}
+
+function viewerSeesFullPost(dto: PostDTO, currentUserId: string | undefined): boolean {
+	if (currentUserId && String(dto.user_id) === currentUserId) return true;
+	if (dto.visibility === 'public') return true;
+	return dto.is_unlocked_for_viewer === true;
+}
+
+function mapMediaFromDto(dto: PostDTO, unlocked: boolean): {
+	type: PostType,
+	mediaUrl?: string,
+	thumbnailUrl?: string,
+} {
+	const media0 = dto.media?.[0];
+	if (!media0) return { type: 'text' };
+	const type: PostType = media0.type === 'video' ? 'video' : 'image';
+	const thumb =
+		typeof media0.thumbnail_url === 'string' && media0.thumbnail_url.trim() ?
+			media0.thumbnail_url.trim() :
+			undefined;
+	const url = typeof media0.url === 'string' ? media0.url.trim() : '';
+	if (!unlocked && !url) {
+		return { type, thumbnailUrl: thumb };
+	}
+	if (url) {
+		return { type, mediaUrl: url, thumbnailUrl: thumb ?? url };
+	}
+	return { type, thumbnailUrl: thumb };
+}
+
+function parseAccessReason(raw: string | null | undefined): string | undefined {
+	if (raw == null || typeof raw !== 'string') return undefined;
+	const t = raw.trim();
+	return t || undefined;
 }
 
 export function postDtoToPost(
@@ -16,21 +50,25 @@ export function postDtoToPost(
 ): Post {
 	const creatorId = String(dto.user_id);
 	const isPPV = dto.visibility === 'ppv';
-	const isLocked = dto.visibility !== 'public';
-	const media0 = dto.media?.[0];
-	let type: PostType = 'text';
-	let mediaUrl: string | undefined;
-	let thumbnailUrl: string | undefined;
-	if (media0) {
-		type = media0.type === 'video' ? 'video' : 'image';
-		mediaUrl = media0.url;
-	}
+	const unlocked = viewerSeesFullPost(dto, currentUserId);
+	const isLocked = dto.visibility !== 'public' && !unlocked;
+	const { type, mediaUrl, thumbnailUrl } = mapMediaFromDto(dto, unlocked);
+	const unlockPriceMinor = resolveUnlockPriceMinor(dto);
+	const isPPVWithPrice = isPPV && unlockPriceMinor != null;
+	const ppvPriceRupees =
+		isPPVWithPrice ? Number(unlockPriceMinor) / 100 :
+		isPPV && dto.ppv_price_usd_cents != null ? dto.ppv_price_usd_cents / 100 :
+		undefined;
+
 	const name = creator?.name ?? 'Creator';
 	const avatar = creator?.avatar ?? '';
 	const username = creator?.username ?? 'creator';
 
 	const likedBy =
 		likedByMe && currentUserId ? [currentUserId] : [];
+
+	const unlockedBy =
+		unlocked && currentUserId ? [currentUserId] : (partial?.unlockedBy ?? []);
 
 	return {
 		id: dto.id,
@@ -44,14 +82,17 @@ export function postDtoToPost(
 		thumbnailUrl,
 		isLocked,
 		isPPV,
-		ppvPrice: isPPV && dto.ppv_price_usd_cents != null ? dto.ppv_price_usd_cents / 100 : undefined,
+		isUnlockedForViewer: unlocked,
+		unlockPriceMinor: unlockPriceMinor ?? undefined,
+		accessReason: parseAccessReason(dto.access_reason),
+		ppvPrice: ppvPriceRupees,
 		likes: dto.like_count ?? 0,
 		likedBy,
 		comments: partial?.comments ?? [],
 		commentCount: dto.comment_count ?? 0,
 		createdAt: dto.created_at,
 		isPinned: partial?.isPinned ?? false,
-		unlockedBy: partial?.unlockedBy ?? [],
+		unlockedBy,
 	};
 }
 
@@ -62,13 +103,16 @@ export function mergePostDtoIntoPost(
 	currentUserId: string | undefined
 ): Post {
 	const likedByMe = currentUserId ? existing.likedBy.includes(currentUserId) : false;
-	const mapped = postDtoToPost(dto, creator, likedByMe, currentUserId);
+	const mapped = postDtoToPost(dto, creator, likedByMe, currentUserId, {
+		comments: existing.comments,
+		isPinned: existing.isPinned,
+		unlockedBy: existing.unlockedBy,
+	});
 	return {
 		...mapped,
 		comments: existing.comments,
 		commentCount: dto.comment_count ?? existing.commentCount,
 		isPinned: existing.isPinned,
-		unlockedBy: existing.unlockedBy,
 		creatorName: creator?.name ?? existing.creatorName,
 		creatorAvatar: creator?.avatar ?? existing.creatorAvatar,
 		creatorUsername: creator?.username ?? existing.creatorUsername,
