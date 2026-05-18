@@ -12,6 +12,14 @@ export function isGuidelinesGateError(message: string): boolean {
 		m.includes('must accept');
 }
 
+let guidelinesCache: StreamGuidelinesResponse | null = null;
+let guidelinesInflight: Promise<StreamGuidelinesResponse> | null = null;
+
+export function clearStreamGuidelinesCache(): void {
+	guidelinesCache = null;
+	guidelinesInflight = null;
+}
+
 export function useStreamGuidelines() {
 	const ws = useWs();
 	const wsConnected = useWsConnected();
@@ -20,28 +28,55 @@ export function useStreamGuidelines() {
 	const canUseWs = wsConnected && wsAuthReady;
 
 	const fetchGuidelines = useCallback((): Promise<StreamGuidelinesResponse> => {
-		if (canUseWs) {
-			return ensureAuth().then(() => contentWsStreamGuidelines(ws));
-		}
-		return creatorsApi.content.streamGuidelines();
+		if (guidelinesCache) return Promise.resolve(guidelinesCache);
+		if (guidelinesInflight) return guidelinesInflight;
+
+		const run = (): Promise<StreamGuidelinesResponse> => {
+			if (canUseWs) {
+				return ensureAuth().then(() => contentWsStreamGuidelines(ws));
+			}
+			return creatorsApi.content.streamGuidelines();
+		};
+
+		guidelinesInflight = run()
+			.then(res => {
+				guidelinesCache = res;
+				guidelinesInflight = null;
+				return res;
+			})
+			.catch(err => {
+				guidelinesInflight = null;
+				throw err;
+			});
+
+		return guidelinesInflight;
 	}, [canUseWs, ensureAuth, ws]);
 
 	const acceptGuidelines = useCallback((): Promise<{ ok: true }> => {
 		const httpAccept = creatorsApi.me.acceptStreamGuidelines();
-		if (canUseWs) {
-			return ensureAuth()
+		const done = canUseWs ?
+			ensureAuth()
 				.then(() => Promise.all([
 					contentWsAcceptStreamGuidelines(ws),
 					httpAccept,
 				]))
-				.then(() => ({ ok: true as const }));
-		}
-		return httpAccept;
+				.then(() => ({ ok: true as const })) :
+			httpAccept;
+
+		return done.then(res => {
+			clearStreamGuidelinesCache();
+			return res;
+		});
 	}, [canUseWs, ensureAuth, ws]);
+
+	const formatError = useCallback(
+		(e: unknown, fallback: string) => apiErrorMessage(e, fallback),
+		[]
+	);
 
 	return {
 		fetchGuidelines,
 		acceptGuidelines,
-		formatError: (e: unknown, fallback: string) => apiErrorMessage(e, fallback),
+		formatError,
 	};
 }

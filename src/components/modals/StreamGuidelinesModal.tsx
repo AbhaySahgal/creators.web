@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../ui/Toast';
 import { Button } from '../ui/Button';
 import { useStreamGuidelines } from '../../hooks/useStreamGuidelines';
 import type { StreamGuidelinesResponse } from '../../services/accountTypes';
+import { apiErrorMessage } from '../../services/creatorsApi';
 
 interface StreamGuidelinesModalProps {
 	isOpen: boolean;
@@ -18,12 +19,14 @@ export function StreamGuidelinesModal({
 	requireAccept = false,
 	onAccepted,
 }: StreamGuidelinesModalProps) {
-	const { fetchGuidelines, acceptGuidelines, formatError } = useStreamGuidelines();
+	const { fetchGuidelines, acceptGuidelines } = useStreamGuidelines();
 	const [guidelines, setGuidelines] = useState<StreamGuidelinesResponse | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [accepting, setAccepting] = useState(false);
 	const [agreed, setAgreed] = useState(false);
 	const [error, setError] = useState('');
+	const fetchRef = useRef(fetchGuidelines);
+	fetchRef.current = fetchGuidelines;
 
 	useEffect(() => {
 		if (!isOpen) {
@@ -31,16 +34,29 @@ export function StreamGuidelinesModal({
 			setError('');
 			return;
 		}
+
+		let cancelled = false;
 		setLoading(true);
 		setError('');
-		void fetchGuidelines()
-			.then(setGuidelines)
-			.catch((e: unknown) => {
-				setError(formatError(e, 'Could not load stream guidelines'));
-				setGuidelines(null);
+
+		void fetchRef.current()
+			.then(data => {
+				if (!cancelled) setGuidelines(data);
 			})
-			.finally(() => setLoading(false));
-	}, [isOpen, fetchGuidelines, formatError]);
+			.catch((e: unknown) => {
+				if (!cancelled) {
+					setError(apiErrorMessage(e, 'Could not load stream guidelines'));
+					setGuidelines(null);
+				}
+			})
+			.finally(() => {
+				if (!cancelled) setLoading(false);
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [isOpen]);
 
 	function handleAccept() {
 		if (!agreed) return;
@@ -52,7 +68,7 @@ export function StreamGuidelinesModal({
 				onClose();
 			})
 			.catch((e: unknown) => {
-				setError(formatError(e, 'Could not accept guidelines'));
+				setError(apiErrorMessage(e, 'Could not accept guidelines'));
 			})
 			.finally(() => setAccepting(false));
 	}
