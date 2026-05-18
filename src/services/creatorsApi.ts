@@ -1,5 +1,25 @@
 import type { User } from '../types';
+import type {
+	AcceptStreamGuidelinesResponse,
+	DeleteRequestResponse,
+	DeleteStatusResponse,
+	DeleteVerifyRequest,
+	DeleteVerifyResponse,
+	ExportDataResponse,
+	StreamGuidelinesResponse,
+} from './accountTypes';
 import { getSessionToken, setSessionToken } from './sessionToken';
+
+export type {
+	AcceptStreamGuidelinesResponse,
+	DeleteAccountStatus,
+	DeleteRequestResponse,
+	DeleteStatusResponse,
+	DeleteVerifyRequest,
+	DeleteVerifyResponse,
+	ExportDataResponse,
+	StreamGuidelinesResponse,
+} from './accountTypes';
 
 export type PreferredRole = 'fan' | 'creator';
 export type UploadKind = 'post_image' | 'post_video' | 'avatar' | 'banner' | 'kyc_doc';
@@ -362,6 +382,32 @@ export const creatorsApi = {
 			update(body: UpdateNotificationSettingsRequest): Promise<UpdateNotificationSettingsResponse> {
 				return requestJson<UpdateNotificationSettingsResponse>('/me/notification-settings', { method: 'PUT', body, auth: true });
 			},
+		},
+		/** B9: POST /me/delete-request */
+		deleteRequest(): Promise<DeleteRequestResponse> {
+			return requestJson<DeleteRequestResponse>('/me/delete-request', { method: 'POST', auth: true });
+		},
+		/** B9: POST /me/delete-verify */
+		deleteVerify(body: DeleteVerifyRequest): Promise<DeleteVerifyResponse> {
+			return requestJson<DeleteVerifyResponse>('/me/delete-verify', { method: 'POST', body, auth: true });
+		},
+		/** B9: GET /me/delete-status */
+		deleteStatus(signal?: AbortSignal): Promise<DeleteStatusResponse> {
+			return requestJson<DeleteStatusResponse>('/me/delete-status', { method: 'GET', auth: true, signal });
+		},
+		/** B9: GET /me/export */
+		exportData(signal?: AbortSignal): Promise<ExportDataResponse> {
+			return requestJson<ExportDataResponse>('/me/export', { method: 'GET', auth: true, signal });
+		},
+		/** B11: POST /me/agreements/stream-guidelines */
+		acceptStreamGuidelines(): Promise<AcceptStreamGuidelinesResponse> {
+			return requestJson<AcceptStreamGuidelinesResponse>('/me/agreements/stream-guidelines', { method: 'POST', auth: true });
+		},
+	},
+	content: {
+		/** B11: GET /content/stream-guidelines */
+		streamGuidelines(signal?: AbortSignal): Promise<StreamGuidelinesResponse> {
+			return requestJson<StreamGuidelinesResponse>('/content/stream-guidelines', { method: 'GET', signal });
 		},
 	},
 	payments: {
