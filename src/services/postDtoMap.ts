@@ -92,6 +92,7 @@ function commentAuthorNameFromDto(dto: CommentDTO): string | null {
 	const typed: (string | null | undefined)[] = [
 		dto.display_name,
 		dto.user_display_name,
+		dto.author_display_name,
 		dto.name,
 		dto.user_name,
 		dto.username,
@@ -104,7 +105,7 @@ function commentAuthorNameFromDto(dto: CommentDTO): string | null {
 	}
 	const raw = dto as unknown as Record<string, unknown>;
 	for (const key of [
-		'author_display', 'fan_display', 'fan_name', 'author_name',
+		'author_display', 'author_display_name', 'fan_display', 'fan_name', 'author_name',
 		'userDisplayName', 'displayName', 'userName', 'authorName',
 	] as const) {
 		const v = raw[key];
@@ -117,7 +118,11 @@ function commentAuthorNameFromDto(dto: CommentDTO): string | null {
 }
 
 function commentAuthorAvatarFromDto(dto: CommentDTO): string | null {
-	const typed: (string | null | undefined)[] = [dto.avatar_url, dto.user_avatar_url];
+	const typed: (string | null | undefined)[] = [
+		dto.avatar_url,
+		dto.user_avatar_url,
+		dto.author_avatar_url,
+	];
 	for (const v of typed) {
 		if (typeof v === 'string') {
 			const t = v.trim();
@@ -125,7 +130,7 @@ function commentAuthorAvatarFromDto(dto: CommentDTO): string | null {
 		}
 	}
 	const raw = dto as unknown as Record<string, unknown>;
-	for (const key of ['user_avatar', 'avatarUrl', 'userAvatar'] as const) {
+	for (const key of ['user_avatar', 'author_avatar_url', 'avatarUrl', 'userAvatar'] as const) {
 		const v = raw[key];
 		if (typeof v === 'string') {
 			const t = v.trim();
