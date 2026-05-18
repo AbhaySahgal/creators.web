@@ -1,8 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { Bell } from '../icons';
 import { NotificationRow } from '../notifications/NotificationRow';
+import type { Notification } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
+import { resolveNotificationTarget } from '../../services/notificationWsService';
 
 interface NotificationPanelProps {
 	onClose: () => void;
@@ -16,10 +18,16 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
 	const userId = authState.user?.id ?? '';
 	const notifications = getUserNotifications(userId).slice(0, 10);
 
-	function handleRowClick(id: string, link?: string) {
-		markRead(id);
+	function handleRowClick(notification: Notification) {
+		markRead(notification.id);
 		onClose();
-		if (link) navigate(link);
+		const target = resolveNotificationTarget(notification);
+		if (!target) return;
+		if (target.state) {
+			void navigate(target.path, { state: target.state });
+		} else {
+			void navigate(target.path);
+		}
 	}
 
 	function goToAll() {
@@ -43,17 +51,13 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
 				{notifications.length === 0 ? (
 					<div className="text-center py-8 text-muted text-sm">No notifications</div>
 				) : (
-					notifications.map(n => {
-						const data = n.data ?? {};
-						const link = typeof data.link === 'string' ? data.link : undefined;
-						return (
-							<NotificationRow
-								key={n.id}
-								notification={n}
-								onClick={() => handleRowClick(n.id, link)}
-							/>
-						);
-					})
+					notifications.map(n => (
+						<NotificationRow
+							key={n.id}
+							notification={n}
+							onClick={() => handleRowClick(n)}
+						/>
+					))
 				)}
 			</div>
 
