@@ -1,4 +1,5 @@
 import type { User } from '../types';
+import type { PostDTO } from './postsTypes';
 import { getSessionToken, setSessionToken } from './sessionToken';
 
 export type PreferredRole = 'fan' | 'creator';
@@ -196,6 +197,18 @@ export interface PaymentsTipResponse {
 	from_balance_after: string;
 }
 
+export interface PaymentsPpvUnlockRequest {
+	postId: string;
+	idempotencyKey?: string;
+}
+
+export interface PaymentsPpvUnlockResponse {
+	post?: PostDTO;
+	entitlement_id?: string;
+	from_balance_after: string;
+	already_owned?: boolean;
+}
+
 export interface MediaCreateUploadRequest {
 	fileName: string;
 	mimeType: string;
@@ -385,6 +398,9 @@ export const creatorsApi = {
 		},
 		tip(body: PaymentsTipRequest): Promise<PaymentsTipResponse> {
 			return requestJsonAllow201<PaymentsTipResponse>('/payments/tip', { method: 'POST', body, auth: true });
+		},
+		ppvUnlock(body: PaymentsPpvUnlockRequest): Promise<PaymentsPpvUnlockResponse> {
+			return requestJsonAllow201<PaymentsPpvUnlockResponse>('/payments/ppv/unlock', { method: 'POST', body, auth: true });
 		},
 		/** When backend is ready: implement POST /payments/stripe/create-payment-intent */
 		stripeCreatePaymentIntent(body: StripeCreatePaymentIntentRequest): Promise<StripeCreatePaymentIntentResponse> {
