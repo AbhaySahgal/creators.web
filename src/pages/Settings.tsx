@@ -253,7 +253,8 @@ export function Settings() {
 						<h2 className="font-semibold text-foreground">Notifications</h2>
 					</div>
 					<p className="text-xs text-muted mb-4">
-						Follow/unfollow alerts are controlled by <span className="text-foreground/80 font-medium">Likes</span> (per backend spec).
+						Follow/unfollow alerts and comment hearts are controlled by{' '}
+						<span className="text-foreground/80 font-medium">Likes</span> (per backend spec).
 					</p>
 					<div className="space-y-3">
 						{(Object.keys(notifPrefs) as (keyof NotificationSettings)[]).map(key => (
