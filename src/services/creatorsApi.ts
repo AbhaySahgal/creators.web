@@ -1,5 +1,13 @@
 import type { User } from '../types';
 import { getSessionToken, setSessionToken } from './sessionToken';
+import {
+	parseShareEventResponse,
+	parseShareMetadata,
+	type ShareEventRequest,
+	type ShareEventResponse,
+	type ShareMetadata,
+	type ShareTargetType,
+} from './shareTypes';
 
 export type PreferredRole = 'fan' | 'creator';
 export type UploadKind = 'post_image' | 'post_video' | 'avatar' | 'banner' | 'kyc_doc';
@@ -421,6 +429,28 @@ export const creatorsApi = {
 	reports: {
 		create(body: CreateReportRequest): Promise<CreateReportResponse> {
 			return requestJson<CreateReportResponse>('/reports', { method: 'POST', body, auth: true });
+		},
+	},
+	share: {
+		get(type: ShareTargetType, id: string, signal?: AbortSignal): Promise<ShareMetadata> {
+			const targetId = id.trim();
+			return requestJson<unknown>(`/share/${type}/${encodeURIComponent(targetId)}`, {
+				method: 'GET',
+				auth: false,
+				signal,
+			}).then(json => {
+				const meta = parseShareMetadata(json, type, targetId);
+				if (!meta) throw new ApiError('Invalid share metadata response', 502, json);
+				return meta;
+			});
+		},
+		recordEvent(body: ShareEventRequest): Promise<ShareEventResponse> {
+			return requestJsonAllow201<unknown>('/share/events', { method: 'POST', body, auth: true })
+				.then(json => {
+					const res = parseShareEventResponse(json);
+					if (!res) throw new ApiError('Invalid share event response', 502, json);
+					return res;
+				});
 		},
 	},
 };
