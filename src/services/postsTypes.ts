@@ -41,12 +41,52 @@ export interface CommentDTO {
 	username?: string | null;
 	avatar_url?: string | null;
 	user_avatar_url?: string | null;
+	/** v4 CommentDTO author aliases */
+	author_display_name?: string | null;
+	author_avatar_url?: string | null;
 }
 
 export interface CommentHeartUpdatePayload {
 	post_id: string;
 	comment_id: string;
 	heart_count: number;
+}
+
+/** v4 A3: `posts /heartcomment` response. */
+export interface HeartCommentResponse {
+	comment_id: string;
+	post_id: string;
+	heart_count: number;
+	comment_author_user_id: string;
+	newlyHearted: boolean;
+}
+
+function coerceBool(v: unknown): boolean {
+	if (typeof v === 'boolean') return v;
+	if (v === 1 || v === '1' || v === 'true') return true;
+	return false;
+}
+
+function coerceId(v: unknown): string {
+	if (typeof v === 'string') return v;
+	if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+	return '';
+}
+
+export function parseHeartCommentResponse(json: unknown): HeartCommentResponse | null {
+	if (!json || typeof json !== 'object') return null;
+	const row = json as Record<string, unknown>;
+	const comment_id = coerceId(row.comment_id);
+	const post_id = coerceId(row.post_id);
+	if (!comment_id || !post_id) return null;
+	const heart_count = Number(row.heart_count);
+	return {
+		comment_id,
+		post_id,
+		heart_count: Number.isFinite(heart_count) ? heart_count : 0,
+		comment_author_user_id: coerceId(row.comment_author_user_id),
+		newlyHearted: coerceBool(row.newlyHearted ?? row.newly_hearted),
+	};
 }
 
 export interface ReportPostResponse {
