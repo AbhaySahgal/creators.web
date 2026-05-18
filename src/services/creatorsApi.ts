@@ -196,6 +196,49 @@ export interface PaymentsTipResponse {
 	from_balance_after: string;
 }
 
+/** B8: POST /payments/tip/live */
+export interface PaymentsTipLiveRequest {
+	liveId: string;
+	amountCents: string;
+	idempotencyKey?: string;
+	currency?: string;
+}
+
+export interface PaymentsTipLiveResponse {
+	tip_id: string;
+	from_balance_after: string;
+	tip_total_minor: string;
+}
+
+/** C4: GET /live/:liveId/analytics */
+export interface LiveStreamAnalyticsResponse {
+	live_id: string;
+	viewer_count: number;
+	like_count: number;
+	tip_total_minor: string;
+	tip_count: number;
+	tips_sum_cents: string;
+	started_at?: string;
+	ended_at?: string | null;
+}
+
+/** C4: GET /me/live/analytics */
+export interface LiveMyAnalyticsStreamRow {
+	id: string;
+	title?: string | null;
+	viewer_count: number;
+	tip_total_minor: string;
+	started_at?: string;
+	ended_at?: string | null;
+}
+
+export interface LiveMyAnalyticsResponse {
+	stream_count: number;
+	total_viewer_count: number;
+	total_tip_minor: string;
+	streams: LiveMyAnalyticsStreamRow[];
+}
+
 export interface MediaCreateUploadRequest {
 	fileName: string;
 	mimeType: string;
@@ -386,6 +429,10 @@ export const creatorsApi = {
 		tip(body: PaymentsTipRequest): Promise<PaymentsTipResponse> {
 			return requestJsonAllow201<PaymentsTipResponse>('/payments/tip', { method: 'POST', body, auth: true });
 		},
+		/** B8: POST /payments/tip/live */
+		tipLive(body: PaymentsTipLiveRequest): Promise<PaymentsTipLiveResponse> {
+			return requestJsonAllow201<PaymentsTipLiveResponse>('/payments/tip/live', { method: 'POST', body, auth: true });
+		},
 		/** When backend is ready: implement POST /payments/stripe/create-payment-intent */
 		stripeCreatePaymentIntent(body: StripeCreatePaymentIntentRequest): Promise<StripeCreatePaymentIntentResponse> {
 			return requestJson<StripeCreatePaymentIntentResponse>('/payments/stripe/create-payment-intent', {
@@ -421,6 +468,26 @@ export const creatorsApi = {
 	reports: {
 		create(body: CreateReportRequest): Promise<CreateReportResponse> {
 			return requestJson<CreateReportResponse>('/reports', { method: 'POST', body, auth: true });
+		},
+	},
+	live: {
+		/** C4: GET /live/:liveId/analytics */
+		analytics(liveId: string, signal?: AbortSignal): Promise<LiveStreamAnalyticsResponse> {
+			return requestJson<LiveStreamAnalyticsResponse>(
+				`/live/${encodeURIComponent(liveId)}/analytics`,
+				{ method: 'GET', auth: true, signal }
+			);
+		},
+		/** C4: GET /me/live/analytics?from=&to= */
+		myAnalytics(params: { from?: string, to?: string }, signal?: AbortSignal): Promise<LiveMyAnalyticsResponse> {
+			const q = new URLSearchParams();
+			if (params.from) q.set('from', params.from);
+			if (params.to) q.set('to', params.to);
+			const qs = q.toString();
+			return requestJson<LiveMyAnalyticsResponse>(
+				`/me/live/analytics${qs ? `?${qs}` : ''}`,
+				{ method: 'GET', auth: true, signal }
+			);
 		},
 	},
 };
