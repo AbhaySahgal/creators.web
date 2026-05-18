@@ -124,6 +124,12 @@ interface WalletContextValue {
 	payExternally: (amountRupees: number, type: Transaction['type'], description: string, recipientId?: string, recipientName?: string) => Promise<{ ok: boolean, cancelled?: boolean, error?: string }>;
 	/** Spec: payment /tip and POST /payments/tip. Amount is minor units (string integer). */
 	tip: (creatorUserId: string, amountCents: string, postId?: string) => Promise<{ ok: boolean, error?: string }>;
+	/** B8: payment /tiplive and POST /payments/tip/live. Amount is minor units (string integer). */
+	tipLive: (
+		liveId: string,
+		amountCents: string,
+		opts?: { idempotencyKey?: string }
+	) => Promise<{ ok: boolean, error?: string, tip_total_minor?: string }>;
 	cancelSubscription: (subscriptionId: string) => void;
 	toggleAutoRenew: (subscriptionId: string) => void;
 	addSubscription: (subscription: Subscription) => void;
@@ -226,6 +232,48 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 			},
 			(e: unknown) => {
 				const msg = e instanceof Error ? e.message : 'Tip failed';
+				dispatch({ type: 'SET_WALLET_ERROR', payload: msg });
+				return { ok: false, error: msg } as const;
+			}
+		);
+	}, [authState.user, wsConnected, payment, updateWalletMinor, refreshLedger, refreshOrders, refreshMe]);
+
+	const tipLive = useCallback((
+		liveId: string,
+		amountCents: string,
+		opts?: { idempotencyKey?: string }
+	) => {
+		const user = authState.user;
+		if (!user) return Promise.resolve({ ok: false, error: 'Not authenticated' });
+		const id = String(liveId ?? '').trim();
+		const amount = String(amountCents ?? '').trim();
+		if (!id) return Promise.resolve({ ok: false, error: 'Invalid live id' });
+		if (!/^\d+$/.test(amount) || BigInt(amount) <= 0n) {
+			return Promise.resolve({ ok: false, error: 'Invalid amount' });
+		}
+
+		const doCall = wsConnected ?
+			payment.tipLive(id, amount, opts) :
+			creatorsApi.payments.tipLive({
+				liveId: id,
+				amountCents: amount,
+				idempotencyKey: opts?.idempotencyKey,
+			});
+
+		return doCall.then(
+			res => {
+				const after = typeof res.from_balance_after === 'string' ? res.from_balance_after : '';
+				if (after && /^\d+$/.test(after)) updateWalletMinor(after);
+				void refreshLedger();
+				void refreshOrders();
+				void refreshMe();
+				return {
+					ok: true,
+					tip_total_minor: typeof res.tip_total_minor === 'string' ? res.tip_total_minor : undefined,
+				} as const;
+			},
+			(e: unknown) => {
+				const msg = e instanceof Error ? e.message : 'Live tip failed';
 				dispatch({ type: 'SET_WALLET_ERROR', payload: msg });
 				return { ok: false, error: msg } as const;
 			}
@@ -504,6 +552,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 			payViaRazorpay,
 			payExternally: payViaRazorpay,
 			tip,
+			tipLive,
 			cancelSubscription,
 			toggleAutoRenew,
 			addSubscription,
