@@ -156,6 +156,12 @@ export function Navbar() {
 							onClick={() => { void navigate('/admin/creators'); }}
 						/>
 						<NavLink
+							label="Curated Top"
+							path="/admin/curated-top"
+							current={location.pathname}
+							onClick={() => { void navigate('/admin/curated-top'); }}
+						/>
+						<NavLink
 							label="Users"
 							path="/admin/users"
 							current={location.pathname}

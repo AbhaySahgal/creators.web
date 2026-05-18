@@ -8,7 +8,9 @@ import { mockCreators } from '../../data/users';
 import type { Creator } from '../../types';
 import { useContent } from '../../context/ContentContext';
 import { useLiveStream } from '../../context/LiveStreamContext';
-import { creatorSummaryToCardCreator } from '../../services/creatorWsMap';
+import { useEnsureWsAuth, useWs, useWsAuthReady, useWsConnected } from '../../context/WsContext';
+import { creatorSummaryToCardCreator, creatorTopRowToCardCreator } from '../../services/creatorWsMap';
+import { creatorWsTopPrimary } from '../../services/creatorWsService';
 import { useDragScroll } from '../../hooks/useDragScroll';
 import { normalizeHashtagTag, textHasHashtag } from '../../utils/hashtag';
 
@@ -31,8 +33,13 @@ export function Explore() {
 	const [sortBy, setSortBy] = useState<'popular' | 'new' | 'price'>('popular');
 	const tagFilter = normalizeHashtagTag(searchParams.get('tag') ?? '');
 	const [wsCreators, setWsCreators] = useState<Creator[]>([]);
+	const [topCreators, setTopCreators] = useState<Creator[]>([]);
 	const [wsDirCursor, setWsDirCursor] = useState<string | null>(null);
 	const [wsDirLoading, setWsDirLoading] = useState(false);
+	const ws = useWs();
+	const wsConnected = useWsConnected();
+	const wsAuthReady = useWsAuthReady();
+	const ensureWsAuth = useEnsureWsAuth();
 	const { getLiveStreams } = useLiveStream();
 	const liveStreams = getLiveStreams();
 	const liveRef = useDragScroll();
@@ -63,6 +70,19 @@ export function Explore() {
 			.finally(() => setWsDirLoading(false));
 	}, [contentState.postsWsStatus, debouncedSearch, category, creatorWsSearch]);
 
+	useEffect(() => {
+		if (contentState.postsWsStatus !== 'ready' || !wsConnected || !wsAuthReady) return;
+		void ensureWsAuth()
+			.then(() => creatorWsTopPrimary(ws, { limit: 10 }))
+			.then(r => {
+				const rows = (r.creators ?? []).map(d => creatorTopRowToCardCreator(d, mockCreators[0]));
+				setTopCreators(rows);
+			})
+			.catch(() => {
+				setTopCreators([]);
+			});
+	}, [contentState.postsWsStatus, ensureWsAuth, ws, wsAuthReady, wsConnected]);
+
 	const filtered = useMemo(() => {
 		return [...wsCreators].sort((a, b) => {
 			if (sortBy === 'popular') {
@@ -80,7 +100,7 @@ export function Explore() {
 		return explorePosts.filter(p => textHasHashtag(p.text ?? '', tagFilter));
 	}, [explorePosts, tagFilter]);
 
-	const trendingCreators = wsCreators.slice(0, 3);
+	const trendingCreators = topCreators.length > 0 ? topCreators.slice(0, 10) : wsCreators.slice(0, 3);
 
 	function loadMoreDirectory() {
 		if (!wsDirCursor || contentState.postsWsStatus !== 'ready') return;
@@ -210,15 +230,17 @@ export function Explore() {
 					<div className="mb-8">
 						<div className="flex items-center gap-2 mb-4">
 							<TrendingUp className="w-4 h-4 text-rose-400" />
-							<h2 className="font-semibold text-foreground text-sm">Trending Now</h2>
+							<h2 className="font-semibold text-foreground text-sm">
+								{topCreators.length > 0 ? 'Top Creators' : 'Trending Now'}
+							</h2>
 						</div>
 						<div ref={trendingRef} className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4">
 							{trendingCreators.map((creator, idx) => (
 								<div key={creator.id} className="relative flex-shrink-0 w-56 sm:w-64 md:w-72">
-									{idx === 0 && (
+									{idx < 3 && (
 										<div className="absolute -top-2 -right-2 z-10 bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5">
 											<Star className="w-2.5 h-2.5 fill-white" />
-											#1 Trending
+											#{idx + 1}{topCreators.length > 0 ? ' Top' : ' Trending'}
 										</div>
 									)}
 									<CreatorCard creator={creator} />
