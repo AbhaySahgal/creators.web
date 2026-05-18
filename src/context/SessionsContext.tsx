@@ -103,7 +103,7 @@ function saveCallAgoraCredsByUser(next: CallAgoraCredsByUserMap) {
 function lookupStoredCallAgora(
 	byUser: CallAgoraCredsByUserMap,
 	userId: string | undefined,
-	requestId: string,
+	requestId: string
 ): NonNullable<SessionsAcceptedPayload['agora']> | undefined {
 	if (!userId) return undefined;
 	return byUser[userId]?.[requestId];
