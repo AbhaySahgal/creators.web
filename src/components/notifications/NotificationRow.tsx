@@ -67,7 +67,7 @@ export function NotificationRow({ notification: n, onClick }: NotificationRowPro
 				(isDeleted ?
 					'opacity-50 cursor-default' :
 					'hover:bg-foreground/5') +
-				(!isRead && !isDeleted ? ' bg-rose-500/5' : '')
+					(!isRead && !isDeleted ? ' bg-rose-500/5' : '')
 			}
 			aria-disabled={isDeleted || undefined}
 		>
