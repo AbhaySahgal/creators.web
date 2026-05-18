@@ -118,7 +118,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 	const navigate = useNavigate();
 	const { state: callState, endCall: endCallCtx, toggleMute: toggleMuteCtx, toggleCamera: toggleCameraCtx, toggleSpeaker: toggleSpeakerCtx } = useCall();
 	const { state: sessionState, endSessionEarly } = useSession();
-	const { state: sessionsState, endSession: endBookedSession } = useSessions();
+	const { state: sessionsState, completeSession: completeBookedSession } = useSessions();
 	const { state: authState } = useAuth();
 
 	const call = callState.activeCall;
@@ -278,8 +278,8 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 		if (didAutoEndBookedRef.current === booking.request_id) return;
 		didAutoEndBookedRef.current = booking.request_id;
 		teardownAgora('end');
-		void endBookedSession(booking.request_id).catch(() => {});
-	}, [sessionsBooking?.accepted?.request_id, sessionsBooking?.accepted?.room_id, bookedRemainingSec, sessionsState.endedRooms, endBookedSession, teardownAgora]);
+		void completeBookedSession(booking.request_id).catch(() => {});
+	}, [sessionsBooking?.accepted?.request_id, sessionsBooking?.accepted?.room_id, bookedRemainingSec, sessionsState.endedRooms, completeBookedSession, teardownAgora]);
 
 	useEffect(() => {
 		const roomId = sessionsBooking?.accepted?.room_id ?? '';
@@ -492,7 +492,18 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 			}
 			teardownAgora('cleanup');
 		};
-	}, [authState.user, call?.id, call?.participantId, call?.type, session?.creatorId, sessionsBooking?.accepted?.request_id, callType, teardownAgora]);
+	}, [
+		authState.user,
+		call?.id,
+		call?.participantId,
+		call?.type,
+		session?.creatorId,
+		sessionsBooking?.accepted?.request_id,
+		sessionsBooking?.accepted?.agora?.token,
+		sessionsBooking?.accepted?.agora?.channel_name,
+		callType,
+		teardownAgora,
+	]);
 
 	useEffect(() => {
 		if (!isVideo) return;
@@ -552,7 +563,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 	const completeEndCall = useCallback(() => {
 		teardownAgora('end');
 		if (sessionsBooking?.accepted) {
-			void endBookedSession(sessionsBooking.accepted.request_id).catch(() => {});
+			void completeBookedSession(sessionsBooking.accepted.request_id).catch(() => {});
 		}
 		if (isTimedSession) {
 			endSessionEarly();
@@ -560,7 +571,7 @@ export function CallSessionProvider({ children }: { children: React.ReactNode })
 		endCallCtx();
 		setIsMinimized(false);
 		navigate(-1);
-	}, [teardownAgora, sessionsBooking?.accepted, isTimedSession, endSessionEarly, endCallCtx, navigate]);
+	}, [teardownAgora, sessionsBooking?.accepted, isTimedSession, endSessionEarly, endCallCtx, navigate, completeBookedSession]);
 
 	const toggleMute = useCallback(() => {
 		if (call) toggleMuteCtx();

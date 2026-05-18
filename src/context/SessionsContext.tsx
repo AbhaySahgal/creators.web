@@ -100,6 +100,15 @@ function saveCallAgoraCredsByUser(next: CallAgoraCredsByUserMap) {
 	}
 }
 
+function lookupStoredCallAgora(
+	byUser: CallAgoraCredsByUserMap,
+	userId: string | undefined,
+	requestId: string,
+): NonNullable<SessionsAcceptedPayload['agora']> | undefined {
+	if (!userId) return undefined;
+	return byUser[userId]?.[requestId];
+}
+
 function loadEndedRooms(): EndedRoomsMap {
 	try {
 		const raw = globalThis.localStorage?.getItem(ENDED_ROOMS_STORAGE_KEY);
@@ -253,8 +262,13 @@ function sessionsReducer(state: SessionsState, action: Action): SessionsState {
 				p.active?.accepted?.request_id &&
 				state.active?.accepted?.request_id === p.active.accepted.request_id
 			) {
+				const prevAgora = state.active.accepted.agora;
+				const nextAgora = p.active.accepted.agora ?? prevAgora;
 				activeOut = {
 					...p.active,
+					accepted: nextAgora ?
+						{ ...p.active.accepted, agora: nextAgora } :
+						p.active.accepted,
 					otherDisplay: p.active.otherDisplay?.name ? p.active.otherDisplay : state.active.otherDisplay,
 					peerIds: p.active.peerIds ?? state.active.peerIds,
 					callModality: p.active.callModality ?? state.active.callModality,
@@ -517,7 +531,10 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 	}, [authState.user, showToast]);
 
 	const bookingRowToAccepted = (row: SessionsBookingRow): SessionsAcceptedPayload => {
-		const storedAgora = callAgoraCredsByRequestIdRef.current[row.id];
+		const userId = authState.user?.id;
+		const storedAgora =
+			callAgoraCredsByRequestIdRef.current[row.id] ??
+			lookupStoredCallAgora(callAgoraCredsByUserRef.current, userId, row.id);
 		const callModality = normalizeCallModality(row.call_modality, row.kind);
 		if (callModality) callModalityByRequestIdRef.current[row.id] = callModality;
 		return {
@@ -544,7 +561,20 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 			return;
 		}
 		callAgoraCredsByRequestIdRef.current = callAgoraCredsByUserRef.current[uid] ?? {};
-	}, [authState.user?.id]);
+
+		const active = state.active;
+		const reqId = active?.accepted?.request_id;
+		if (!reqId || active.accepted.agora || active.accepted.kind !== 'call') return;
+		const stored = callAgoraCredsByRequestIdRef.current[reqId];
+		if (!stored) return;
+		dispatch({
+			type: 'ACTIVE_SET',
+			payload: {
+				...active,
+				accepted: { ...active.accepted, agora: stored },
+			},
+		});
+	}, [authState.user?.id, state.active?.accepted?.request_id, state.active?.accepted?.agora, state.active?.accepted?.kind]);
 
 	const deriveTimerFromEndsAt = (opts: { requestId: string, roomId: string, endsAt: string | null | undefined }) => {
 		const ends = opts.endsAt ?? '';
@@ -562,6 +592,11 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 	};
 
 	const applyRemoteState = useCallback((remote: SessionsStateResponse) => {
+		const userId = authState.user?.id;
+		if (userId) {
+			callAgoraCredsByRequestIdRef.current = callAgoraCredsByUserRef.current[userId] ?? {};
+		}
+
 		const outgoing = (remote.outgoing ?? []);
 		const incomingRows = (remote.incoming ?? []);
 		const activeRows = (remote.active ?? []);
@@ -646,8 +681,16 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 					undefined) ??
 					callModalityByRequestIdRef.current[activeAccepted.id];
 			if (callModality) callModalityByRequestIdRef.current[activeAccepted.id] = callModality;
+			let accepted = bookingRowToAccepted(activeAccepted);
+			if (
+				!accepted.agora &&
+				state.active?.accepted?.request_id === activeAccepted.id &&
+				state.active.accepted.agora
+			) {
+				accepted = { ...accepted, agora: state.active.accepted.agora };
+			}
 			nextActive = {
-				accepted: bookingRowToAccepted(activeAccepted),
+				accepted,
 				minutes: activeAccepted.duration_minutes,
 				callModality,
 				uiCallType: callModality,

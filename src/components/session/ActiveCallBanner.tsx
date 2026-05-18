@@ -11,7 +11,7 @@ import { formatMmSsFromSeconds } from '../../utils/date';
 /** Top bar when a booked call is active and the user is not on `/call` and has not chosen PiP minimize. */
 export function ActiveCallBanner() {
 	const navigate = useNavigate();
-	const { state, endSession } = useSessions();
+	const { state, completeSession } = useSessions();
 	const { state: chatState } = useChat();
 	const { state: authState } = useAuth();
 	const { state: contentState } = useContent();
@@ -79,7 +79,7 @@ export function ActiveCallBanner() {
 	function handleEndCall() {
 		if (!booking.accepted.request_id || ending) return;
 		setEnding(true);
-		void endSession(booking.accepted.request_id)
+		void completeSession(booking.accepted.request_id)
 			.catch(() => {})
 			.finally(() => { setEnding(false); });
 	}
