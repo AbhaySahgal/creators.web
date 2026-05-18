@@ -32,6 +32,7 @@ import {
 	postDtoToPost,
 } from '../services/postDtoMap';
 import { useAuth } from './AuthContext';
+import { unlockPpvPostFromWallet, fetchPost, shareErrorMessage } from '../services/ppvService';
 
 export type PostsWsStatus = 'idle' | 'connecting' | 'ready' | 'error';
 
@@ -420,6 +421,9 @@ interface ContentContextValue {
 	addReply: (postId: string, parentCommentId: string, text: string) => Promise<void>;
 	heartComment: (commentId: string) => Promise<void>;
 	unlockPost: (postId: string, userId: string) => void;
+	/** B6: server PPV unlock (wallet debit). After Razorpay checkout, call this to fulfill entitlement. */
+	unlockPpvPost: (postId: string) => Promise<{ ok: boolean, error?: string, alreadyOwned?: boolean }>;
+	refreshPostFromServer: (postId: string) => Promise<void>;
 	addPost: (post: Post) => void;
 	createPost: (input: CreatePostInput) => Promise<void>;
 	editPost: (postId: string, text: string) => Promise<void>;
@@ -457,7 +461,7 @@ const ContentContext = createContext<ContentContextValue | null>(null);
 
 export function ContentProvider({ children }: { children: React.ReactNode }) {
 	const [state, dispatch] = useReducer(contentReducer, initialState);
-	const { state: authState } = useAuth();
+	const { state: authState, updateWalletMinor } = useAuth();
 	const ws = useWs();
 	const wsConnected = useWsConnected();
 	const wsAuthReady = useWsAuthReady();
@@ -1222,6 +1226,70 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 		dispatch({ type: 'UNLOCK_POST', payload: { postId, userId } });
 	}, []);
 
+	const mergeUnlockedDtoIntoFeed = useCallback(
+		(dto: PostDTO) => {
+			const uid = authUserRef.current?.id;
+			const creatorUserId = String(dto.user_id);
+			void fetchProfilesForIds([creatorUserId]).then(profiles => {
+				const prof = resolveCreatorDisplay(creatorUserId, profiles);
+				const existing = stateRef.current.posts.find(p => p.id === dto.id);
+				const likedByMe = uid ? existing?.likedBy.includes(uid) ?? false : false;
+				const post = existing ?
+					mergePostDtoIntoPost(existing, dto, prof, uid) :
+					postDtoToPost(dto, prof, likedByMe, uid);
+				dispatch({ type: 'UPSERT_POST', payload: post });
+			});
+		},
+		[fetchProfilesForIds, resolveCreatorDisplay]
+	);
+
+	const refreshPostFromServer = useCallback(
+		(postId: string) => {
+			if (mockMode) return Promise.resolve();
+			return fetchPost(postId, { ws, wsAuthReady: wsAuthReady && wsConnected })
+				.then(dto => { mergeUnlockedDtoIntoFeed(dto); })
+				.catch(() => undefined);
+		},
+		[mockMode, ws, wsConnected, wsAuthReady, mergeUnlockedDtoIntoFeed]
+	);
+
+	const unlockPpvPost = useCallback(
+		(postId: string): Promise<{ ok: boolean, error?: string, alreadyOwned?: boolean }> => {
+			if (mockMode) {
+				const uid = authState.user?.id;
+				if (!uid) return Promise.resolve({ ok: false, error: 'Not authenticated' });
+				dispatch({ type: 'UNLOCK_POST', payload: { postId, userId: uid } });
+				return Promise.resolve({ ok: true });
+			}
+			if (!authState.user) return Promise.resolve({ ok: false, error: 'Not authenticated' });
+			return unlockPpvPostFromWallet(postId, {
+				ws,
+				wsConnected,
+				wsAuthReady: wsAuthReady && wsConnected,
+			})
+				.then(res => {
+					if (res.fromBalanceAfter && /^\d+$/.test(res.fromBalanceAfter)) {
+						updateWalletMinor(res.fromBalanceAfter);
+					}
+					mergeUnlockedDtoIntoFeed(res.post);
+					return { ok: true, alreadyOwned: res.alreadyOwned };
+				})
+				.catch(err => ({
+					ok: false,
+					error: shareErrorMessage(err, 'Could not unlock post'),
+				}));
+		},
+		[
+			mockMode,
+			authState.user,
+			ws,
+			wsConnected,
+			wsAuthReady,
+			updateWalletMinor,
+			mergeUnlockedDtoIntoFeed,
+		]
+	);
+
 	const subscribe = useCallback((creatorUserId: string) => {
 		dispatch({ type: 'SUBSCRIBE', payload: creatorUserId });
 	}, []);
@@ -1245,6 +1313,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				addReply,
 				heartComment,
 				unlockPost,
+				unlockPpvPost,
+				refreshPostFromServer,
 				addPost,
 				createPost,
 				editPost,
