@@ -1,5 +1,6 @@
 import type { User } from '../types';
 import { getSessionToken, setSessionToken } from './sessionToken';
+import type { ListConversationsResponse } from './chatWsTypes';
 
 export type PreferredRole = 'fan' | 'creator';
 export type UploadKind = 'post_image' | 'post_video' | 'avatar' | 'banner' | 'kyc_doc';
@@ -421,6 +422,15 @@ export const creatorsApi = {
 	reports: {
 		create(body: CreateReportRequest): Promise<CreateReportResponse> {
 			return requestJson<CreateReportResponse>('/reports', { method: 'POST', body, auth: true });
+		},
+	},
+	/** B7 HTTP mirror of `chat /listconversations`. */
+	chat: {
+		listConversations(params: { limit: number, before?: string }): Promise<ListConversationsResponse> {
+			const q = new URLSearchParams();
+			q.set('limit', String(params.limit));
+			if (params.before) q.set('before', params.before);
+			return requestJson<ListConversationsResponse>(`/chat/conversations?${q.toString()}`, { method: 'GET', auth: true });
 		},
 	},
 };
