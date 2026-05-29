@@ -11,6 +11,8 @@ import { formatDistanceToNow } from '../../utils/date';
 import { formatINR } from '../../services/razorpay';
 import { TipModal } from '../modals/TipModal';
 import { PPVUnlockModal } from '../modals/PPVUnlockModal';
+import { ShareSheetModal } from '../modals/ShareSheetModal';
+import { useShareSheet } from '../../hooks/useShareSheet';
 import { Modal } from './Toast';
 import { isPostCommented } from '../../services/commentedPosts';
 import { RichTextarea } from './RichTextarea';
@@ -36,6 +38,7 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 		state: contentState,
 	} = useContent();
 	const { showToast } = useNotifications();
+	const { openShare, shareSheetProps } = useShareSheet();
 	const navigate = useNavigate();
 	const [showComments, setShowComments] = useState(false);
 	const [showTipModal, setShowTipModal] = useState(false);
@@ -339,7 +342,13 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 						<MessageCircle className={`w-5 h-5 ${isCommented ? 'fill-rose-500' : ''}`} />
 						<span className="text-xs font-medium">{commentCountShown}</span>
 					</button>
-					<button className="flex items-center gap-1.5 text-muted hover:text-foreground transition-colors">
+					<button
+						type="button"
+						onClick={() => openShare({ type: 'post', targetId: post.id })}
+						disabled={shareSheetProps.loading && shareSheetProps.isOpen}
+						className="flex items-center gap-1.5 text-muted hover:text-foreground transition-colors motion-safe:active:scale-95 disabled:opacity-50"
+						aria-label="Share post"
+					>
 						<Send className="w-5 h-5" />
 					</button>
 				</div>
@@ -375,6 +384,8 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 					<PostCommentThread post={post} commentNext={commentNext} onCommentPosted={() => setIsCommented(true)} />
 				</div>
 			)}
+
+			<ShareSheetModal {...shareSheetProps} />
 
 			{showTipModal && (
 				<TipModal
