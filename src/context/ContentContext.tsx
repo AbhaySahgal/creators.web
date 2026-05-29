@@ -15,15 +15,16 @@ import {
 	buildCreatorListCommand,
 } from '../services/creatorWsService';
 import type { CreatorGetResponse, CreatorListResponse } from '../services/creatorWsTypes';
-import type {
-	CommentDTO,
-	CommentHeartUpdatePayload,
-	DeletedPostEventPayload,
-	LikeUpdateEventPayload,
-	ListCommentsResponse,
-	ListPostsResponse,
-	PostDTO,
-	ReportPostResponse,
+import {
+	parseHeartCommentResponse,
+	type CommentDTO,
+	type CommentHeartUpdatePayload,
+	type DeletedPostEventPayload,
+	type LikeUpdateEventPayload,
+	type ListCommentsResponse,
+	type ListPostsResponse,
+	type PostDTO,
+	type ReportPostResponse,
 } from '../services/postsTypes';
 import {
 	type CreatorDisplay,
@@ -1117,19 +1118,16 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 	const heartComment = useCallback(
 		(commentId: string) =>
 			wsRequestLine('posts', `/heartcomment ${commentId}`).then(json => {
-				const body = json as { comment_id?: string, post_id?: string, heart_count?: number };
-				const postId = String(body.post_id ?? '');
-				const cid = String(body.comment_id ?? '');
-				if (postId && cid) {
-					dispatch({
-						type: 'PATCH_COMMENT_HEART',
-						payload: {
-							postId,
-							commentId: cid,
-							heart_count: Number(body.heart_count) || 0,
-						},
-					});
-				}
+				const body = parseHeartCommentResponse(json);
+				if (!body) return;
+				dispatch({
+					type: 'PATCH_COMMENT_HEART',
+					payload: {
+						postId: body.post_id,
+						commentId: body.comment_id,
+						heart_count: body.heart_count,
+					},
+				});
 			}),
 		[wsRequestLine]
 	);
