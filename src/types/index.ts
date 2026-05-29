@@ -168,6 +168,10 @@ export interface Post {
 	thumbnailUrl?: string;
 	isLocked: boolean;
 	isPPV: boolean;
+	/** B6: server entitlement for current viewer. */
+	isUnlockedForViewer?: boolean;
+	/** B6: unlock price in minor units (string). */
+	unlockPriceMinor?: string;
 	ppvPrice?: number;
 	likes: number;
 	likedBy: string[];

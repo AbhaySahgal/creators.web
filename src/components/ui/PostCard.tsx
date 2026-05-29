@@ -57,7 +57,11 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 	const isLiked = post.likedBy.includes(userId);
 	const isSubscribedToCreator = isSubscribed(post.creatorId);
 	const isOwner = userId === post.creatorId;
-	const isContentVisible = isOwner || !post.isLocked || (post.isPPV && post.unlockedBy.includes(userId)) || (!post.isPPV && isSubscribedToCreator);
+	const isContentVisible =
+		isOwner ||
+		post.isUnlockedForViewer === true ||
+		(!post.isPPV && post.isLocked && isSubscribedToCreator) ||
+		(!post.isLocked && !post.isPPV);
 
 	const commentNext = contentState.commentPagination[post.id];
 	const commentCountShown = Math.max(post.commentCount, post.comments.length);
@@ -278,10 +282,10 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 				</p>
 			)}
 
-			{post.type !== 'text' && post.mediaUrl && (
+			{post.type !== 'text' && (post.mediaUrl || post.thumbnailUrl) && (
 				<div className="relative">
 					<img
-						src={post.mediaUrl}
+						src={isContentVisible ? (post.mediaUrl ?? post.thumbnailUrl) : (post.thumbnailUrl ?? post.mediaUrl)}
 						alt="Post content"
 						className={`w-full object-cover max-h-[480px] ${!isContentVisible ? 'filter blur-xl scale-105' : ''} transition-all duration-500`}
 						style={{ aspectRatio: '4/3' }}
