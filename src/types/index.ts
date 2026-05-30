@@ -127,6 +127,8 @@ export interface User {
 }
 
 export interface Creator extends User {
+	/** creators table PK from WS /list (`id`), not used for routes. */
+	creatorProfileId?: string;
 	bio: string;
 	banner: string;
 	subscriptionPrice: number;
@@ -170,6 +172,10 @@ export interface Post {
 	thumbnailUrl?: string;
 	isLocked: boolean;
 	isPPV: boolean;
+	/** B6: server entitlement for current viewer. */
+	isUnlockedForViewer?: boolean;
+	/** B6: unlock price in minor units (string). */
+	unlockPriceMinor?: string;
 	ppvPrice?: number;
 	likes: number;
 	likedBy: string[];

@@ -14,7 +14,7 @@ import { useSession } from '../../context/SessionContext';
 import { SessionPickerModal, type SessionPayMode } from '../../components/modals/SessionPickerModal';
 import type { Creator, SessionType } from '../../types';
 import { ApiError, creatorsApi } from '../../services/creatorsApi';
-import { creatorProfileDtoToCreator, httpCreatorProfileToCreator } from '../../services/creatorWsMap';
+import { creatorProfileDtoToCreator, httpCreatorProfileToDto } from '../../services/creatorWsMap';
 import { formatINR } from '../../services/razorpay';
 import { useSessions } from '../../context/SessionsContext';
 import { useEnsureWsAuth, useWs, useWsAuthReady, useWsConnected } from '../../context/WsContext';
@@ -30,7 +30,7 @@ export function CreatorProfile() {
 	const { state: contentState, isSubscribed, loadCreatorPosts, creatorWsGetByUserId } = useContent();
 	const { showToast } = useNotifications();
 	useSession();
-	const { requestSession, state: sessionsState, clearOutgoing } = useSessions();
+	const { requestSession } = useSessions();
 	const ws = useWs();
 	const wsConnected = useWsConnected();
 	const wsAuthReady = useWsAuthReady();
@@ -68,20 +68,35 @@ export function CreatorProfile() {
 		if (!creatorUserId) return;
 		const ac = new AbortController();
 
-		// creator WS commands are multiplexed over the posts socket; wait until it is ready.
-		if (contentState.postsWsStatus !== 'ready') {
-			setIsLoadingCreator(true);
-			return () => ac.abort();
-		}
+		const finishWs = (r: Awaited<ReturnType<typeof creatorWsGetByUserId>>) => {
+			if (ac.signal.aborted) return;
+			if (r.creator) {
+				hasLoadedCreatorRef.current = true;
+				const dto = r.creator;
+				setIsFollowed(Boolean(dto.is_followed));
+				setProfileLikedByMe(Boolean(dto.is_profile_liked));
+				setRemoteCreator(creatorProfileDtoToCreator(dto, cacheCreator ?? undefined));
+				return;
+			}
+			if (!hasLoadedCreatorRef.current && !cacheCreator) {
+				showToast('Creator profile not found for this user.', 'error');
+			}
+			if (!hasLoadedCreatorRef.current && cacheCreator) {
+				setRemoteCreator(cacheCreator);
+			}
+		};
 
 		setIsLoadingCreator(true);
 
-		const applyHttpFallback = () =>
+		const applyHttpProfile = () =>
 			creatorsApi.creators.getById(creatorUserId, ac.signal)
-				.then(http => {
+				.then(h => {
 					if (ac.signal.aborted) return;
 					hasLoadedCreatorRef.current = true;
-					setRemoteCreator(httpCreatorProfileToCreator(http, { postCount: 0 }));
+					setIsFollowed(Boolean(h.isFollowed));
+					setProfileLikedByMe(Boolean(h.isProfileLiked));
+					const dto = httpCreatorProfileToDto(h);
+					setRemoteCreator(creatorProfileDtoToCreator(dto, cacheCreator ?? undefined));
 				})
 				.catch((httpErr: unknown) => {
 					if (ac.signal.aborted) return;
@@ -91,6 +106,9 @@ export function CreatorProfile() {
 							'Could not load creator profile. Please try again.';
 						showToast(msg, 'error');
 					}
+					if (!hasLoadedCreatorRef.current && cacheCreator) {
+						setRemoteCreator(cacheCreator);
+					}
 					hasLoadedCreatorRef.current = true;
 				});
 
@@ -98,30 +116,24 @@ export function CreatorProfile() {
 			.then(r => {
 				if (ac.signal.aborted) return;
 				if (r.creator) {
-					hasLoadedCreatorRef.current = true;
-					const dto = r.creator;
-					setIsFollowed(Boolean(dto.is_followed));
-					setProfileLikedByMe(Boolean(dto.is_profile_liked));
-					setRemoteCreator(creatorProfileDtoToCreator(dto, { postCount: 0 }));
+					finishWs(r);
 					return;
 				}
-				return applyHttpFallback();
+				return applyHttpProfile();
 			})
 			.catch((err: unknown) => {
 				if (ac.signal.aborted) return;
-				if (err instanceof ApiError) {
-					console.error('[creator-profile] ws getByUserId failed', { creatorUserId, status: err.status, body: err.body });
-				} else {
-					console.error('[creator-profile] ws getByUserId failed', { creatorUserId, err });
+				if (!(err instanceof ApiError) || err.status !== 404) {
+					console.error('[creator-profile] WS get failed', { creatorUserId, err });
 				}
-				return applyHttpFallback();
+				return applyHttpProfile();
 			})
 			.finally(() => {
 				if (!ac.signal.aborted) setIsLoadingCreator(false);
 			});
 
 		return () => ac.abort();
-	}, [creatorUserId, creatorWsGetByUserId, contentState.postsWsStatus, cacheCreator, showToast]);
+	}, [creatorUserId, cacheCreator, creatorWsGetByUserId, contentState.postsWsStatus, showToast]);
 
 	useEffect(() => {
 		if (!creatorUserId) return;
@@ -150,22 +162,6 @@ export function CreatorProfile() {
 		document.addEventListener('mousedown', onDoc);
 		return () => { document.removeEventListener('mousedown', onDoc); };
 	}, [profileMenuOpen]);
-
-	useEffect(() => {
-		if (sessionsState.outgoing.state === 'rejected') {
-			showToast(sessionsState.outgoing.rejected.message || 'Session rejected', 'error');
-		}
-		if (sessionsState.outgoing.state === 'accepted') {
-			showToast('Session accepted!');
-		}
-	}, [sessionsState.outgoing, showToast, clearOutgoing]);
-
-	// Clear outgoing state only when leaving this page (avoid infinite effect loop).
-	useEffect(() => {
-		return () => {
-			clearOutgoing();
-		};
-	}, [clearOutgoing]);
 
 	function handleProfileLikeToggle() {
 		if (!authState.user || !creatorUserId) {
@@ -227,15 +223,17 @@ export function CreatorProfile() {
 	const subStatus = subDto ? subscriptionUiStatus(subDto) : null;
 	const subscribed = subStatus === 'active' || isSubscribed(creator.id);
 	const subId = subDto ? subscriptionId(subDto) : null;
-	const isOwner = authState.user?.id === creator.id;
+	const isOwner =
+		authState.user?.role === 'creator' &&
+		authState.user.id === creatorUserId;
 	const creatorForDisplay: Creator = isOwner && authState.user ? {
 		...creator,
-		name: authState.user.name,
-		username: authState.user.username,
-		avatar: authState.user.avatar,
-		bio: authState.user.bio ?? creator.bio,
-		banner: authState.user.banner ?? creator.banner,
-		category: authState.user.category ?? creator.category,
+		name: authState.user.name.trim() ? authState.user.name : creator.name,
+		username: authState.user.username.trim() ? authState.user.username : creator.username,
+		avatar: authState.user.avatar.trim() ? authState.user.avatar : creator.avatar,
+		bio: authState.user.bio?.trim() ? authState.user.bio : creator.bio,
+		banner: authState.user.banner?.trim() ? authState.user.banner : creator.banner,
+		category: authState.user.category?.trim() ? authState.user.category : creator.category,
 	} : creator;
 
 	const creatorPosts = contentState.posts
@@ -261,9 +259,6 @@ export function CreatorProfile() {
 			...(kind === 'call' && uiCallType ? { uiCallType } : {}),
 			creatorDisplay: { name: creatorForDisplay.name, avatar: creatorForDisplay.avatar },
 		})
-			.then(() => {
-				showToast('Session request sent. Waiting for creator…');
-			})
 			.catch(err => {
 				showToast(err instanceof Error ? err.message : 'Failed to request session', 'error');
 			});

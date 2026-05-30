@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, TrendingUp, Star, Users, Eye, Compass } from '../../components/icons';
 import { Layout } from '../../components/layout/Layout';
@@ -9,7 +9,12 @@ import type { Creator } from '../../types';
 import { useContent } from '../../context/ContentContext';
 import { useLiveStream } from '../../context/LiveStreamContext';
 import { creatorsApi } from '../../services/creatorsApi';
-import { creatorSummaryToCardCreator, creatorTopDtoToCardCreator } from '../../services/creatorWsMap';
+import {
+	creatorSummaryToCardCreator,
+	creatorTopDtoToCardCreator,
+	dedupeCreatorsByUserId,
+	hydrateCreatorCardsFromHttp,
+} from '../../services/creatorWsMap';
 import type { CreatorTopResponse } from '../../services/creatorWsTypes';
 import { useDragScroll } from '../../hooks/useDragScroll';
 import { normalizeHashtagTag, textHasHashtag } from '../../utils/hashtag';
@@ -33,6 +38,10 @@ export function Explore() {
 	const [sortBy, setSortBy] = useState<'popular' | 'new' | 'price'>('popular');
 	const tagFilter = normalizeHashtagTag(searchParams.get('tag') ?? '');
 	const [wsCreators, setWsCreators] = useState<Creator[]>([]);
+	const wsCreatorsRef = useRef<Creator[]>([]);
+	useEffect(() => {
+		wsCreatorsRef.current = wsCreators;
+	}, [wsCreators]);
 	const [wsDirCursor, setWsDirCursor] = useState<string | null>(null);
 	const [wsDirLoading, setWsDirLoading] = useState(false);
 	const [topCreators, setTopCreators] = useState<Creator[]>([]);
@@ -55,19 +64,38 @@ export function Explore() {
 
 	useEffect(() => {
 		if (contentState.postsWsStatus !== 'ready') return;
+		const ac = new AbortController();
+		let cancelled = false;
 		setWsDirLoading(true);
 		const cat = category === 'All' ? undefined : category;
 		const q = debouncedSearch.trim() || undefined;
 		void creatorWsSearch({ q, category: cat, limit: 30 })
 			.then(r => {
-				setWsCreators(r.creators.map(d => creatorSummaryToCardCreator(d, mockCreators[0])));
+				if (cancelled) return null;
+				const base = dedupeCreatorsByUserId(
+					r.creators.map(d => creatorSummaryToCardCreator(d, mockCreators[0]))
+				);
+				setWsCreators(base);
 				setWsDirCursor(r.nextCursor ?? null);
+				return hydrateCreatorCardsFromHttp(base, ac.signal);
+			})
+			.then(merged => {
+				if (merged == null || cancelled || ac.signal.aborted) return;
+				setWsCreators(dedupeCreatorsByUserId(merged));
 			})
 			.catch(() => {
+				if (cancelled) return;
 				setWsCreators([]);
 				setWsDirCursor(null);
 			})
-			.finally(() => setWsDirLoading(false));
+			.finally(() => {
+				if (!cancelled) setWsDirLoading(false);
+			});
+
+		return () => {
+			cancelled = true;
+			ac.abort();
+		};
 	}, [contentState.postsWsStatus, debouncedSearch, category, creatorWsSearch]);
 
 	const loadTrending = useCallback((cursor?: string, append = false) => {
@@ -123,18 +151,27 @@ export function Explore() {
 
 	function loadMoreDirectory() {
 		if (!wsDirCursor || contentState.postsWsStatus !== 'ready') return;
+		const ac = new AbortController();
 		const cat = category === 'All' ? undefined : category;
 		const q = debouncedSearch.trim() || undefined;
 		void creatorWsSearch({ q, category: cat, limit: 30, cursor: wsDirCursor })
 			.then(r => {
-				const next = r.creators.map(d => creatorSummaryToCardCreator(d, mockCreators[0]));
-				setWsCreators(prev => {
-					const seen: Record<string, true> = {};
-					for (const c of prev) seen[c.id] = true;
-					const add = next.filter(c => !seen[c.id]);
-					return [...prev, ...add];
-				});
+				const nextRows = r.creators.map(d => creatorSummaryToCardCreator(d, mockCreators[0]));
+				const prev = wsCreatorsRef.current;
+				const seen: Record<string, true> = {};
+				for (const c of prev) seen[c.id] = true;
+				const add = nextRows.filter(c => !seen[c.id]);
+				setWsCreators(dedupeCreatorsByUserId([...prev, ...add]));
 				setWsDirCursor(r.nextCursor ?? null);
+				if (!add.length) return null;
+				return hydrateCreatorCardsFromHttp(add, ac.signal).then(mergedAdds => {
+					if (ac.signal.aborted) return;
+					setWsCreators(cur => {
+						const byId: Record<string, Creator> = {};
+						for (const c of mergedAdds) byId[c.id] = c;
+						return dedupeCreatorsByUserId(cur.map(c => byId[c.id] ?? c));
+					});
+				});
 			})
 			.catch(() => {});
 	}
