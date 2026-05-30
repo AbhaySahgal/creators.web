@@ -25,8 +25,11 @@ export function creatorProfileDtoToCreator(dto: CreatorProfileDTO, base?: Partia
 	const followerCount = parseFollowerCount(dto, base);
 	const fromDtoPostCount = parsePostCountFromDto(dto);
 	const postCount = fromDtoPostCount ?? (base?.postCount ?? 0);
+	const creatorProfileId =
+		dto.id && dto.id !== dto.user_id ? dto.id : (base?.creatorProfileId);
 	return {
 		id: dto.user_id,
+		creatorProfileId,
 		email: base?.email ?? '',
 		name: dto.name,
 		username: dto.username,
@@ -59,7 +62,7 @@ export function creatorProfileDtoToCreator(dto: CreatorProfileDTO, base?: Partia
 	};
 }
 
-/** Creator card row id is `creators.id` (PK); UI may route by `user_id` — see Explore / profile wiring. */
+/** Creator card row id is `creators.id` (PK); UI routes by `user_id`. */
 export function creatorSummaryToCardCreator(dto: CreatorSummaryDTO, base?: Partial<Creator>): Creator {
 	const fakeProfile: CreatorProfileDTO = {
 		...dto,
@@ -74,9 +77,11 @@ export function creatorSummaryToCardCreator(dto: CreatorSummaryDTO, base?: Parti
 /** Map GET /creators JSON (camelCase) → WS-shaped DTO for `creatorProfileDtoToCreator`. */
 export function httpCreatorProfileToDto(h: CreatorProfileResponse): CreatorProfileDTO {
 	const cats = h.categories?.length ? h.categories : (h.category ? [h.category] : []);
+	const userId = h.id;
+	const rowPk = h.creatorProfileId;
 	return {
-		id: h.id,
-		user_id: h.id,
+		id: rowPk ?? userId,
+		user_id: userId,
 		username: h.username,
 		name: h.name,
 		avatar_url: h.avatar || null,
@@ -91,6 +96,19 @@ export function httpCreatorProfileToDto(h: CreatorProfileResponse): CreatorProfi
 		follower_count: h.followerCount,
 		is_followed: h.isFollowed,
 	};
+}
+
+/** Dedupe directory rows by canonical user id (`Creator.id`). */
+export function dedupeCreatorsByUserId(creators: Creator[]): Creator[] {
+	const out: Creator[] = [];
+	const seen: Record<string, true> = {};
+	for (const c of creators) {
+		const key = String(c.id);
+		if (seen[key]) continue;
+		seen[key] = true;
+		out.push(c);
+	}
+	return out;
 }
 
 const CREATOR_CARD_HTTP_CONCURRENCY = 5;

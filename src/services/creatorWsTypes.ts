@@ -14,7 +14,7 @@ export interface CreatorProfileDTO extends CreatorSummaryDTO {
 	created_at: string;
 	/** Spec: creator /get includes subscription price in minor units as integer string. */
 	subscription_price_minor?: string | null;
-	/** Spec: creator /get includes profile like stats for the viewer. */
+	/** Spec: creator /get includes profile like stats for the viewer (nullable on some backends). */
 	profile_like_count?: number | null;
 	is_profile_liked?: boolean | null;
 	/** Optional extra fields present on some backends (used for follow UI). */

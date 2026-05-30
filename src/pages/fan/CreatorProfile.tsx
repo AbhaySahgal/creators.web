@@ -166,7 +166,7 @@ export function CreatorProfile() {
 		if (sessionsState.outgoing.state === 'accepted') {
 			showToast('Session accepted!');
 		}
-	}, [sessionsState.outgoing, showToast, clearOutgoing]);
+	}, [sessionsState.outgoing, showToast]);
 
 	// Clear outgoing state only when leaving this page (avoid infinite effect loop).
 	useEffect(() => {
@@ -233,18 +233,18 @@ export function CreatorProfile() {
 	const subStatus = subDto ? subscriptionUiStatus(subDto) : null;
 	const subscribed = subStatus === 'active' || isSubscribed(creator.id);
 	const subId = subDto ? subscriptionId(subDto) : null;
-	const isOwner = authState.user?.id === creator.id;
-	const creatorForDisplay: Creator = isOwner && authState.user ?
-		{
-			...creator,
-			name: authState.user.name,
-			username: authState.user.username,
-			avatar: authState.user.avatar,
-			bio: authState.user.bio ?? creator.bio,
-			banner: authState.user.banner ?? creator.banner,
-			category: authState.user.category ?? creator.category,
-		} :
-		creator;
+	const isOwner =
+		authState.user?.role === 'creator' &&
+		authState.user.id === creatorUserId;
+	const creatorForDisplay: Creator = isOwner && authState.user ? {
+		...creator,
+		name: authState.user.name.trim() ? authState.user.name : creator.name,
+		username: authState.user.username.trim() ? authState.user.username : creator.username,
+		avatar: authState.user.avatar.trim() ? authState.user.avatar : creator.avatar,
+		bio: authState.user.bio?.trim() ? authState.user.bio : creator.bio,
+		banner: authState.user.banner?.trim() ? authState.user.banner : creator.banner,
+		category: authState.user.category?.trim() ? authState.user.category : creator.category,
+	} : creator;
 
 	const creatorPosts = contentState.posts
 		.filter(p => p.creatorId === creatorForDisplay.id)
@@ -274,7 +274,9 @@ export function CreatorProfile() {
 			creatorDisplay: { name: creatorForDisplay.name, avatar: creatorForDisplay.avatar },
 		})
 			.then(() => { showToast('Session request sent. Waiting for creator…'); })
-			.catch(err => { showToast(err instanceof Error ? err.message : 'Failed to request session', 'error'); });
+			.catch(err => {
+				showToast(err instanceof Error ? err.message : 'Failed to request session', 'error');
+			});
 	}
 
 	function handleWsFollow() {

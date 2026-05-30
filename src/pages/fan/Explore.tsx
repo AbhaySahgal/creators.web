@@ -8,7 +8,11 @@ import { mockCreators } from '../../data/users';
 import type { Creator } from '../../types';
 import { useContent } from '../../context/ContentContext';
 import { useLiveStream } from '../../context/LiveStreamContext';
-import { creatorSummaryToCardCreator, hydrateCreatorCardsFromHttp } from '../../services/creatorWsMap';
+import {
+	creatorSummaryToCardCreator,
+	dedupeCreatorsByUserId,
+	hydrateCreatorCardsFromHttp,
+} from '../../services/creatorWsMap';
 import { useDragScroll } from '../../hooks/useDragScroll';
 import { normalizeHashtagTag, textHasHashtag } from '../../utils/hashtag';
 
@@ -61,14 +65,16 @@ export function Explore() {
 		void creatorWsSearch({ q, category: cat, limit: 30 })
 			.then(r => {
 				if (cancelled) return null;
-				const base = r.creators.map(d => creatorSummaryToCardCreator(d, mockCreators[0]));
+				const base = dedupeCreatorsByUserId(
+					r.creators.map(d => creatorSummaryToCardCreator(d, mockCreators[0]))
+				);
 				setWsCreators(base);
 				setWsDirCursor(r.nextCursor ?? null);
 				return hydrateCreatorCardsFromHttp(base, ac.signal);
 			})
 			.then(merged => {
 				if (merged == null || cancelled || ac.signal.aborted) return;
-				setWsCreators(merged);
+				setWsCreators(dedupeCreatorsByUserId(merged));
 			})
 			.catch(() => {
 				if (cancelled) return;
@@ -99,7 +105,7 @@ export function Explore() {
 				const seen: Record<string, true> = {};
 				for (const c of prev) seen[c.id] = true;
 				const add = nextRows.filter(c => !seen[c.id]);
-				setWsCreators([...prev, ...add]);
+				setWsCreators(dedupeCreatorsByUserId([...prev, ...add]));
 				setWsDirCursor(r.nextCursor ?? null);
 				if (!add.length) return null;
 				return hydrateCreatorCardsFromHttp(add, ac.signal).then(mergedAdds => {
@@ -107,7 +113,7 @@ export function Explore() {
 					setWsCreators(cur => {
 						const byId: Record<string, Creator> = {};
 						for (const c of mergedAdds) byId[c.id] = c;
-						return cur.map(c => byId[c.id] ?? c);
+						return dedupeCreatorsByUserId(cur.map(c => byId[c.id] ?? c));
 					});
 				});
 			})
