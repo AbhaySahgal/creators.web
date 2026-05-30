@@ -29,6 +29,7 @@ import {
 	type ListCommentsResponse,
 	type ListPostsResponse,
 	type PostDTO,
+	type ReportPostResponse,
 } from '../services/postsTypes';
 import {
 	type CreatorDisplay,
