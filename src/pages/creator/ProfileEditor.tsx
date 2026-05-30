@@ -110,8 +110,10 @@ export function ProfileEditor() {
 		const perMinuteRateMinor =
 			/^\d+$/.test(perMinuteRateMinorStr) ? Number(perMinuteRateMinorStr) : undefined;
 
-		const avatarUrlSend = !avatarFile && avatarUrl.trim() ? avatarUrl.trim() : undefined;
-		const bannerUrlSend = !bannerFile && bannerUrl.trim() ? bannerUrl.trim() : undefined;
+		const avatarUrlTrim = avatarUrl.trim();
+		const bannerUrlTrim = bannerUrl.trim();
+		const avatarUrlSend = !avatarFile && avatarUrlTrim ? avatarUrlTrim : undefined;
+		const bannerUrlSend = !bannerFile && bannerUrlTrim ? bannerUrlTrim : undefined;
 
 		void Promise.all([avatarPromise, bannerPromise])
 			.then(([avatarAssetId, bannerAssetId]) =>
@@ -121,9 +123,9 @@ export function ProfileEditor() {
 					bio: bio.trim() || undefined,
 					category: category?.trim() || undefined,
 					avatarAssetId,
-					avatarUrl: avatarUrlSend,
+					...(!avatarAssetId && avatarUrlSend ? { avatarUrl: avatarUrlSend } : {}),
 					bannerAssetId,
-					bannerUrl: bannerUrlSend,
+					...(!bannerAssetId && bannerUrlSend ? { bannerUrl: bannerUrlSend } : {}),
 					subscriptionPriceMinor,
 					perMinuteRate: perMinuteRateMinor,
 				}).then(result => ({ ...result, avatarAssetId, bannerAssetId }))
