@@ -15,6 +15,7 @@ import { SessionsProvider } from './context/SessionsContext';
 import { CallSessionProvider } from './context/CallSessionContext';
 import { MinimizedCallWindow } from './components/call/MinimizedCallWindow';
 import { InboxServerSync } from './components/chat/InboxServerSync';
+import { PendingSessionRequestCard } from './components/session/PendingSessionRequestCard';
 
 import { Landing } from './pages/Landing';
 import { Login } from './pages/auth/Login';
@@ -292,6 +293,7 @@ export default function App() {
 			<ErrorBoundary>
 				<AppRoutes />
 				<MinimizedCallWindow />
+				<PendingSessionRequestCard />
 			</ErrorBoundary>
 		</Providers>
 	);

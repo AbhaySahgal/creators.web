@@ -1,6 +1,15 @@
 import type { User } from '../types';
+import type { PostDTO } from './postsTypes';
 import { getSessionToken, setSessionToken } from './sessionToken';
 import type { ListConversationsResponse } from './chatWsTypes';
+import {
+	parseShareEventResponse,
+	parseShareMetadata,
+	type ShareEventRequest,
+	type ShareEventResponse,
+	type ShareMetadata,
+	type ShareTargetType,
+} from './shareTypes';
 
 export type PreferredRole = 'fan' | 'creator';
 export type UploadKind = 'post_image' | 'post_video' | 'avatar' | 'banner' | 'kyc_doc';
@@ -9,6 +18,16 @@ export type CreatorProfileResponse = User & {
 	bio?: string,
 	banner?: string,
 	category?: string,
+	/** From GET /creators spec (camelCase). */
+	categories?: string[],
+	socials?: Record<string, unknown>,
+	followerCount?: number,
+	isFollowed?: boolean,
+	profileLikeCount?: number,
+	isProfileLiked?: boolean,
+	subscriptionPriceMinor?: string | null,
+	/** creators table PK when distinct from user id. */
+	creatorProfileId?: string,
 };
 
 function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse {
@@ -23,17 +42,32 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 	);
 
 	const avatar =
+		(typeof obj.avatarUrl === 'string' && obj.avatarUrl) ||
 		(typeof obj.avatar === 'string' && obj.avatar) ||
 		(typeof obj.avatar_url === 'string' && obj.avatar_url) ||
 		'';
 	const banner =
+		(typeof obj.bannerUrl === 'string' && obj.bannerUrl) ||
 		(typeof obj.banner === 'string' && obj.banner) ||
 		(typeof obj.banner_url === 'string' && obj.banner_url) ||
 		undefined;
 
+	const categoriesRaw = obj.categories;
+	const categories = Array.isArray(categoriesRaw) ?
+		categoriesRaw.filter((x): x is string => typeof x === 'string') :
+		undefined;
+	const catFirst = categories?.[0];
+	const categoryField =
+		typeof obj.category === 'string' ? obj.category :
+		catFirst;
+
+	const userId = asString(obj.userId ?? obj.user_id);
+	const creatorProfileId = asString(obj.id);
+
 	return {
 		...(obj as unknown as User),
-		id: asString(obj.id ?? obj.user_id),
+		id: userId || creatorProfileId,
+		creatorProfileId: creatorProfileId && creatorProfileId !== userId ? creatorProfileId : undefined,
 		email: asString(obj.email),
 		name: asString(obj.name),
 		username: asString(obj.username),
@@ -41,7 +75,17 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 		role: 'creator',
 		bio: typeof obj.bio === 'string' ? obj.bio : undefined,
 		banner,
-		category: typeof obj.category === 'string' ? obj.category : undefined,
+		category: categoryField,
+		createdAt: asString(obj.createdAt ?? obj.created_at) || '',
+		categories,
+		followerCount: typeof obj.followerCount === 'number' ? obj.followerCount : undefined,
+		isFollowed: typeof obj.isFollowed === 'boolean' ? obj.isFollowed : undefined,
+		profileLikeCount: typeof obj.profileLikeCount === 'number' ? obj.profileLikeCount : undefined,
+		isProfileLiked: typeof obj.isProfileLiked === 'boolean' ? obj.isProfileLiked : undefined,
+		subscriptionPriceMinor:
+			typeof obj.subscriptionPriceMinor === 'string' ? obj.subscriptionPriceMinor :
+			obj.subscriptionPriceMinor == null ? null :
+			undefined,
 	};
 }
 
@@ -110,6 +154,11 @@ export interface UpdateNotificationSettingsRequest {
 
 export interface UpdateNotificationSettingsResponse {
 	settings: NotificationSettings;
+}
+
+export interface ChangePasswordRequest {
+	currentPassword: string;
+	newPassword: string;
 }
 
 export interface CreateReportRequest {
@@ -195,6 +244,18 @@ export interface PaymentsTipResponse {
 		created_at: string,
 	};
 	from_balance_after: string;
+}
+
+export interface PaymentsPpvUnlockRequest {
+	postId: string;
+	idempotencyKey?: string;
+}
+
+export interface PaymentsPpvUnlockResponse {
+	post?: PostDTO;
+	entitlement_id?: string;
+	from_balance_after: string;
+	already_owned?: boolean;
 }
 
 export interface MediaCreateUploadRequest {
@@ -387,6 +448,9 @@ export const creatorsApi = {
 		tip(body: PaymentsTipRequest): Promise<PaymentsTipResponse> {
 			return requestJsonAllow201<PaymentsTipResponse>('/payments/tip', { method: 'POST', body, auth: true });
 		},
+		ppvUnlock(body: PaymentsPpvUnlockRequest): Promise<PaymentsPpvUnlockResponse> {
+			return requestJsonAllow201<PaymentsPpvUnlockResponse>('/payments/ppv/unlock', { method: 'POST', body, auth: true });
+		},
 		/** When backend is ready: implement POST /payments/stripe/create-payment-intent */
 		stripeCreatePaymentIntent(body: StripeCreatePaymentIntentRequest): Promise<StripeCreatePaymentIntentResponse> {
 			return requestJson<StripeCreatePaymentIntentResponse>('/payments/stripe/create-payment-intent', {
@@ -413,10 +477,14 @@ export const creatorsApi = {
 		},
 	},
 	creators: {
-		// Public creator profile for display (not in the core HTTP doc; must exist on your API).
-		getById(id: string, signal?: AbortSignal): Promise<CreatorProfileResponse> {
-			return requestJson<unknown>(`/creators/${encodeURIComponent(id)}`, { method: 'GET', signal })
-				.then(normalizeCreatorProfileResponse);
+		/** Public creator card; sends Bearer when logged in so isFollowed / isProfileLiked are accurate. */
+		getById(creatorUserId: string, signal?: AbortSignal): Promise<CreatorProfileResponse> {
+			const token = getSessionToken();
+			return requestJson<unknown>(`/creators/${encodeURIComponent(creatorUserId)}`, {
+				method: 'GET',
+				signal,
+				auth: Boolean(token),
+			}).then(normalizeCreatorProfileResponse);
 		},
 	},
 	reports: {
@@ -431,6 +499,28 @@ export const creatorsApi = {
 			q.set('limit', String(params.limit));
 			if (params.before) q.set('before', params.before);
 			return requestJson<ListConversationsResponse>(`/chat/conversations?${q.toString()}`, { method: 'GET', auth: true });
+		},
+	},
+	share: {
+		get(type: ShareTargetType, id: string, signal?: AbortSignal): Promise<ShareMetadata> {
+			const targetId = id.trim();
+			return requestJson<unknown>(`/share/${type}/${encodeURIComponent(targetId)}`, {
+				method: 'GET',
+				auth: false,
+				signal,
+			}).then(json => {
+				const meta = parseShareMetadata(json, type, targetId);
+				if (!meta) throw new ApiError('Invalid share metadata response', 502, json);
+				return meta;
+			});
+		},
+		recordEvent(body: ShareEventRequest): Promise<ShareEventResponse> {
+			return requestJsonAllow201<unknown>('/share/events', { method: 'POST', body, auth: true })
+				.then(json => {
+					const res = parseShareEventResponse(json);
+					if (!res) throw new ApiError('Invalid share event response', 502, json);
+					return res;
+				});
 		},
 	},
 };
