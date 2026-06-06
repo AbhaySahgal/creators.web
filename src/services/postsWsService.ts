@@ -1,5 +1,12 @@
 import type { WsClient } from './wsClient';
-import type { CreatePostResponse, PostInsightsResponse } from './postsTypes';
+import {
+	parseGetPostResponse,
+	parseUnlockPostResponse,
+	type CreatePostResponse,
+	type GetPostResponse,
+	type PostInsightsResponse,
+	type UnlockPostResponse,
+} from './postsTypes';
 
 export interface CreatePostInput {
 	visibility: 'public' | 'subscribers' | 'ppv';
@@ -39,14 +46,58 @@ function parseCommandLine(line: string): { command: string, args: string[] } {
 	return { command: parts[0].slice(1), args: parts.slice(1) };
 }
 
+function assertPostId(value: string): string {
+	const id = value.trim();
+	if (!id) throw new Error('post id is required');
+	if (/\s/.test(id)) throw new Error('post id must not contain whitespace');
+	return id;
+}
+
+function assertRequestIdTag(tag?: string): string | undefined {
+	if (tag === undefined) return undefined;
+	const t = tag.trim();
+	if (!t) return undefined;
+	if (/\s/.test(t)) throw new Error('requestId must not contain spaces');
+	return t;
+}
+
 export function postsCreate(ws: WsClient, input: CreatePostInput, requestId?: string): Promise<CreatePostResponse> {
 	const { command, args } = parseCommandLine(buildCreatePostCommand(input));
 	return ws.request('posts', command, args, requestId).then(json => json as CreatePostResponse);
 }
 
 export function postsInsights(ws: WsClient, postId: string, requestId?: string): Promise<PostInsightsResponse> {
-	const id = String(postId).trim();
-	if (!id) throw new Error('postId is required');
-	if (/\s/.test(id)) throw new Error('postId must not contain whitespace');
-	return ws.request('posts', 'insights', [id], requestId).then(json => json as PostInsightsResponse);
+	const id = assertPostId(postId);
+	const rid = assertRequestIdTag(requestId);
+	return ws.request('posts', 'insights', [id], rid).then(json => json as PostInsightsResponse);
+}
+
+/** `> posts <rid>\n/get <postId>` */
+export function postsGet(
+	ws: WsClient,
+	postId: string,
+	requestId?: string
+): Promise<GetPostResponse> {
+	const id = assertPostId(postId);
+	const rid = assertRequestIdTag(requestId);
+	return ws.request('posts', 'get', [id], rid).then(json => {
+		const res = parseGetPostResponse(json);
+		if (!res) throw new Error('Invalid posts /get response');
+		return res;
+	});
+}
+
+/** `> posts <rid>\n/unlock <postId>` */
+export function postsUnlock(
+	ws: WsClient,
+	postId: string,
+	requestId?: string
+): Promise<UnlockPostResponse> {
+	const id = assertPostId(postId);
+	const rid = assertRequestIdTag(requestId);
+	return ws.request('posts', 'unlock', [id], rid).then(json => {
+		const res = parseUnlockPostResponse(json);
+		if (!res) throw new Error('Invalid posts /unlock response');
+		return res;
+	});
 }

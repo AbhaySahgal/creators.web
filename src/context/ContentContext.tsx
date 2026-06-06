@@ -15,15 +15,16 @@ import {
 	buildCreatorListCommand,
 } from '../services/creatorWsService';
 import type { CreatorGetResponse, CreatorListResponse } from '../services/creatorWsTypes';
-import type {
-	CommentDTO,
-	CommentHeartUpdatePayload,
-	DeletedPostEventPayload,
-	LikeUpdateEventPayload,
-	ListCommentsResponse,
-	ListPostsResponse,
-	PostDTO,
-	ReportPostResponse,
+import {
+	parseHeartCommentResponse,
+	type CommentDTO,
+	type CommentHeartUpdatePayload,
+	type DeletedPostEventPayload,
+	type LikeUpdateEventPayload,
+	type ListCommentsResponse,
+	type ListPostsResponse,
+	type PostDTO,
+	type ReportPostResponse,
 } from '../services/postsTypes';
 import {
 	type CreatorDisplay,
@@ -33,6 +34,7 @@ import {
 } from '../services/postDtoMap';
 import { useAuth } from './AuthContext';
 import { postsCreate, type CreatePostInput } from '../services/postsWsService';
+import { unlockPpvPostFromWallet, fetchPost, shareErrorMessage } from '../services/ppvService';
 
 export type PostsWsStatus = 'idle' | 'connecting' | 'ready' | 'error';
 
@@ -416,6 +418,9 @@ interface ContentContextValue {
 	addReply: (postId: string, parentCommentId: string, text: string) => Promise<void>;
 	heartComment: (commentId: string) => Promise<void>;
 	unlockPost: (postId: string, userId: string) => void;
+	/** B6: server PPV unlock (wallet debit). After Razorpay checkout, call this to fulfill entitlement. */
+	unlockPpvPost: (postId: string) => Promise<{ ok: boolean, error?: string, alreadyOwned?: boolean }>;
+	refreshPostFromServer: (postId: string) => Promise<void>;
 	addPost: (post: Post) => void;
 	createPost: (input: CreatePostInput) => Promise<void>;
 	editPost: (postId: string, text: string) => Promise<void>;
@@ -453,7 +458,7 @@ const ContentContext = createContext<ContentContextValue | null>(null);
 
 export function ContentProvider({ children }: { children: React.ReactNode }) {
 	const [state, dispatch] = useReducer(contentReducer, initialState);
-	const { state: authState } = useAuth();
+	const { state: authState, updateWalletMinor } = useAuth();
 	const ws = useWs();
 	const wsConnected = useWsConnected();
 	const wsAuthReady = useWsAuthReady();
@@ -1113,19 +1118,16 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 	const heartComment = useCallback(
 		(commentId: string) =>
 			wsRequestLine('posts', `/heartcomment ${commentId}`).then(json => {
-				const body = json as { comment_id?: string, post_id?: string, heart_count?: number };
-				const postId = String(body.post_id ?? '');
-				const cid = String(body.comment_id ?? '');
-				if (postId && cid) {
-					dispatch({
-						type: 'PATCH_COMMENT_HEART',
-						payload: {
-							postId,
-							commentId: cid,
-							heart_count: Number(body.heart_count) || 0,
-						},
-					});
-				}
+				const body = parseHeartCommentResponse(json);
+				if (!body) return;
+				dispatch({
+					type: 'PATCH_COMMENT_HEART',
+					payload: {
+						postId: body.post_id,
+						commentId: body.comment_id,
+						heart_count: body.heart_count,
+					},
+				});
 			}),
 		[wsRequestLine]
 	);
@@ -1196,6 +1198,70 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 		dispatch({ type: 'UNLOCK_POST', payload: { postId, userId } });
 	}, []);
 
+	const mergeUnlockedDtoIntoFeed = useCallback(
+		(dto: PostDTO) => {
+			const uid = authUserRef.current?.id;
+			const creatorUserId = String(dto.user_id);
+			void fetchProfilesForIds([creatorUserId]).then(profiles => {
+				const prof = resolveCreatorDisplay(creatorUserId, profiles);
+				const existing = stateRef.current.posts.find(p => p.id === dto.id);
+				const likedByMe = uid ? existing?.likedBy.includes(uid) ?? false : false;
+				const post = existing ?
+					mergePostDtoIntoPost(existing, dto, prof, uid) :
+					postDtoToPost(dto, prof, likedByMe, uid);
+				dispatch({ type: 'UPSERT_POST', payload: post });
+			});
+		},
+		[fetchProfilesForIds, resolveCreatorDisplay]
+	);
+
+	const refreshPostFromServer = useCallback(
+		(postId: string) => {
+			if (mockMode) return Promise.resolve();
+			return fetchPost(postId, { ws, wsAuthReady: wsAuthReady && wsConnected })
+				.then(dto => { mergeUnlockedDtoIntoFeed(dto); })
+				.catch(() => undefined);
+		},
+		[mockMode, ws, wsConnected, wsAuthReady, mergeUnlockedDtoIntoFeed]
+	);
+
+	const unlockPpvPost = useCallback(
+		(postId: string): Promise<{ ok: boolean, error?: string, alreadyOwned?: boolean }> => {
+			if (mockMode) {
+				const uid = authState.user?.id;
+				if (!uid) return Promise.resolve({ ok: false, error: 'Not authenticated' });
+				dispatch({ type: 'UNLOCK_POST', payload: { postId, userId: uid } });
+				return Promise.resolve({ ok: true });
+			}
+			if (!authState.user) return Promise.resolve({ ok: false, error: 'Not authenticated' });
+			return unlockPpvPostFromWallet(postId, {
+				ws,
+				wsConnected,
+				wsAuthReady: wsAuthReady && wsConnected,
+			})
+				.then(res => {
+					if (res.fromBalanceAfter && /^\d+$/.test(res.fromBalanceAfter)) {
+						updateWalletMinor(res.fromBalanceAfter);
+					}
+					mergeUnlockedDtoIntoFeed(res.post);
+					return { ok: true, alreadyOwned: res.alreadyOwned };
+				})
+				.catch(err => ({
+					ok: false,
+					error: shareErrorMessage(err, 'Could not unlock post'),
+				}));
+		},
+		[
+			mockMode,
+			authState.user,
+			ws,
+			wsConnected,
+			wsAuthReady,
+			updateWalletMinor,
+			mergeUnlockedDtoIntoFeed,
+		]
+	);
+
 	const subscribe = useCallback((creatorUserId: string) => {
 		dispatch({ type: 'SUBSCRIBE', payload: creatorUserId });
 	}, []);
@@ -1219,6 +1285,8 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				addReply,
 				heartComment,
 				unlockPost,
+				unlockPpvPost,
+				refreshPostFromServer,
 				addPost,
 				createPost,
 				editPost,

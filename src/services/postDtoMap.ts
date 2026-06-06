@@ -1,5 +1,5 @@
 import type { Comment, Post, PostType } from '../types';
-import type { CommentDTO, PostDTO } from './postsTypes';
+import { resolveUnlockPriceMinor, type CommentDTO, type PostDTO } from './postsTypes';
 
 export interface CreatorDisplay {
 	name: string;
@@ -14,6 +14,34 @@ export function isPostMediaPending(dto: PostDTO): boolean {
 	return !(m.url ?? '').trim();
 }
 
+function isUnlockedForViewer(dto: PostDTO, currentUserId: string | undefined): boolean {
+	if (dto.is_unlocked_for_viewer === true) return true;
+	if (currentUserId && String(dto.user_id) === currentUserId) return true;
+	return false;
+}
+
+function mapMediaFromDto(dto: PostDTO, unlocked: boolean): {
+	type: PostType,
+	mediaUrl?: string,
+	thumbnailUrl?: string,
+} {
+	const media0 = dto.media?.[0];
+	if (!media0) return { type: 'text' };
+	const type: PostType = media0.type === 'video' ? 'video' : 'image';
+	const thumb =
+		typeof media0.thumbnail_url === 'string' && media0.thumbnail_url.trim() ?
+			media0.thumbnail_url.trim() :
+			undefined;
+	const url = typeof media0.url === 'string' ? media0.url.trim() : '';
+	if (!unlocked && !url) {
+		return { type, thumbnailUrl: thumb };
+	}
+	if (url) {
+		return { type, mediaUrl: url, thumbnailUrl: thumb ?? url };
+	}
+	return { type, thumbnailUrl: thumb };
+}
+
 export function postDtoToPost(
 	dto: PostDTO,
 	creator: CreatorDisplay | undefined,
@@ -23,18 +51,15 @@ export function postDtoToPost(
 ): Post {
 	const creatorId = String(dto.user_id);
 	const isPPV = dto.visibility === 'ppv';
-	const isLocked = dto.visibility !== 'public';
-	const media0 = dto.media?.[0];
-	let type: PostType = 'text';
-	let mediaUrl: string | undefined;
-	let thumbnailUrl: string | undefined;
-	if (media0) {
-		type = media0.type === 'video' ? 'video' : 'image';
-		const url = (media0.url ?? '').trim();
-		if (url) mediaUrl = url;
-		const thumb = media0.thumbnail_url;
-		if (typeof thumb === 'string' && thumb.trim()) thumbnailUrl = thumb.trim();
-	}
+	const unlocked = isUnlockedForViewer(dto, currentUserId);
+	const isLocked = dto.visibility !== 'public' && !unlocked;
+	const { type, mediaUrl, thumbnailUrl } = mapMediaFromDto(dto, unlocked);
+	const unlockPriceMinor = resolveUnlockPriceMinor(dto);
+	const isPPVWithPrice = isPPV && unlockPriceMinor != null;
+	const ppvPriceRupees =
+		isPPVWithPrice ? Number(unlockPriceMinor) / 100 :
+		isPPV && dto.ppv_price_usd_cents != null ? dto.ppv_price_usd_cents / 100 :
+		undefined;
 	const mediaPending = isPostMediaPending(dto);
 	const name = creator?.name ?? 'Creator';
 	const avatar = creator?.avatar ?? '';
@@ -42,6 +67,9 @@ export function postDtoToPost(
 
 	const likedBy =
 		likedByMe && currentUserId ? [currentUserId] : [];
+
+	const unlockedBy =
+		unlocked && currentUserId ? [currentUserId] : (partial?.unlockedBy ?? []);
 
 	return {
 		id: dto.id,
@@ -55,14 +83,16 @@ export function postDtoToPost(
 		thumbnailUrl,
 		isLocked,
 		isPPV,
-		ppvPrice: isPPV && dto.ppv_price_usd_cents != null ? dto.ppv_price_usd_cents / 100 : undefined,
+		isUnlockedForViewer: unlocked,
+		unlockPriceMinor: unlockPriceMinor ?? undefined,
+		ppvPrice: ppvPriceRupees,
 		likes: dto.like_count ?? 0,
 		likedBy,
 		comments: partial?.comments ?? [],
 		commentCount: dto.comment_count ?? 0,
 		createdAt: dto.created_at,
 		isPinned: partial?.isPinned ?? false,
-		unlockedBy: partial?.unlockedBy ?? [],
+		unlockedBy,
 		mediaPending,
 	};
 }
@@ -74,13 +104,16 @@ export function mergePostDtoIntoPost(
 	currentUserId: string | undefined
 ): Post {
 	const likedByMe = currentUserId ? existing.likedBy.includes(currentUserId) : false;
-	const mapped = postDtoToPost(dto, creator, likedByMe, currentUserId);
+	const mapped = postDtoToPost(dto, creator, likedByMe, currentUserId, {
+		comments: existing.comments,
+		isPinned: existing.isPinned,
+		unlockedBy: existing.unlockedBy,
+	});
 	return {
 		...mapped,
 		comments: existing.comments,
 		commentCount: dto.comment_count ?? existing.commentCount,
 		isPinned: existing.isPinned,
-		unlockedBy: existing.unlockedBy,
 		creatorName: creator?.name ?? existing.creatorName,
 		creatorAvatar: creator?.avatar ?? existing.creatorAvatar,
 		creatorUsername: creator?.username ?? existing.creatorUsername,
@@ -104,6 +137,7 @@ function commentAuthorNameFromDto(dto: CommentDTO): string | null {
 	const typed: (string | null | undefined)[] = [
 		dto.display_name,
 		dto.user_display_name,
+		dto.author_display_name,
 		dto.name,
 		dto.user_name,
 		dto.username,
@@ -116,7 +150,7 @@ function commentAuthorNameFromDto(dto: CommentDTO): string | null {
 	}
 	const raw = dto as unknown as Record<string, unknown>;
 	for (const key of [
-		'author_display', 'fan_display', 'fan_name', 'author_name',
+		'author_display', 'author_display_name', 'fan_display', 'fan_name', 'author_name',
 		'userDisplayName', 'displayName', 'userName', 'authorName',
 	] as const) {
 		const v = raw[key];
@@ -129,7 +163,11 @@ function commentAuthorNameFromDto(dto: CommentDTO): string | null {
 }
 
 function commentAuthorAvatarFromDto(dto: CommentDTO): string | null {
-	const typed: (string | null | undefined)[] = [dto.avatar_url, dto.user_avatar_url];
+	const typed: (string | null | undefined)[] = [
+		dto.avatar_url,
+		dto.user_avatar_url,
+		dto.author_avatar_url,
+	];
 	for (const v of typed) {
 		if (typeof v === 'string') {
 			const t = v.trim();
@@ -137,7 +175,7 @@ function commentAuthorAvatarFromDto(dto: CommentDTO): string | null {
 		}
 	}
 	const raw = dto as unknown as Record<string, unknown>;
-	for (const key of ['user_avatar', 'avatarUrl', 'userAvatar'] as const) {
+	for (const key of ['user_avatar', 'author_avatar_url', 'avatarUrl', 'userAvatar'] as const) {
 		const v = raw[key];
 		if (typeof v === 'string') {
 			const t = v.trim();
