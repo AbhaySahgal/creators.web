@@ -56,6 +56,15 @@ export interface PaymentConfirmResponse {
 	alreadyConfirmed?: true;
 	/** Present when `purpose=subscription` flow is confirmed. */
 	subscription?: Record<string, unknown>;
+	/** Present when `purpose=ppv` flow is confirmed (if backend returns it). */
+	post?: Record<string, unknown>;
+	entitlement_id?: string;
+}
+
+export interface PaymentPpvUnlockResponse {
+	entitlement_id: string;
+	from_balance_after: string;
+	already_owned: boolean;
 }
 
 export interface TipDTO {
@@ -139,6 +148,27 @@ export function createPaymentWs(client: WsClient) {
 			if (limit != null) args.push(String(limit));
 			if (before?.trim()) args.push(before.trim());
 			return client.request(SVC, 'payouthistory', args).then(json => normalizePayoutHistory(json));
+		},
+		ppvUnlock(postId: string, idempotencyKey?: string): Promise<PaymentPpvUnlockResponse> {
+			const id = String(postId ?? '').trim();
+			if (!id) throw new Error('postId is required');
+			if (/\s/.test(id)) throw new Error('postId must not contain whitespace');
+			const key = idempotencyKey?.trim();
+			const args = key ? [id, `idempotency_key=${key}`] : [id];
+			return client.request(SVC, 'ppvunlock', args).then(json => {
+				if (!json || typeof json !== 'object') throw new Error('Invalid payment /ppvunlock response');
+				const o = json as Record<string, unknown>;
+				const entitlement_id = typeof o.entitlement_id === 'string' ? o.entitlement_id.trim() : '';
+				const from_balance_after = typeof o.from_balance_after === 'string' ? o.from_balance_after.trim() : '';
+				if (!entitlement_id || !from_balance_after) {
+					throw new Error('Invalid payment /ppvunlock response');
+				}
+				return {
+					entitlement_id,
+					from_balance_after,
+					already_owned: o.already_owned === true,
+				};
+			});
 		},
 	};
 }
