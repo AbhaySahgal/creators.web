@@ -124,6 +124,8 @@ interface WalletContextValue {
 	payExternally: (amountRupees: number, type: Transaction['type'], description: string, recipientId?: string, recipientName?: string) => Promise<{ ok: boolean, cancelled?: boolean, error?: string }>;
 	/** Spec: payment /tip and POST /payments/tip. Amount is minor units (string integer). */
 	tip: (creatorUserId: string, amountCents: string, postId?: string) => Promise<{ ok: boolean, error?: string }>;
+	/** Razorpay checkout for PPV (credits wallet); caller must chain posts /unlock. */
+	payPpvCheckout: (postId: string, amountMinor: string, description: string) => Promise<{ ok: boolean, cancelled?: boolean, error?: string }>;
 	cancelSubscription: (subscriptionId: string) => void;
 	toggleAutoRenew: (subscriptionId: string) => void;
 	addSubscription: (subscription: Subscription) => void;
@@ -435,6 +437,88 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 			});
 	}, [authState.user, settleRazorpayWithServer]);
 
+	const payPpvCheckout = useCallback((
+		postId: string,
+		amountMinor: string,
+		description: string
+	): Promise<{ ok: boolean, cancelled?: boolean, error?: string }> => {
+		const user = authState.user;
+		if (!user) return Promise.resolve({ ok: false, error: 'Not authenticated' });
+		const minor = String(amountMinor ?? '').trim();
+		if (!/^\d+$/.test(minor) || BigInt(minor) <= 0n) {
+			return Promise.resolve({ ok: false, error: 'Invalid amount' });
+		}
+		const pid = String(postId ?? '').trim();
+		if (!pid) return Promise.resolve({ ok: false, error: 'Invalid post id' });
+
+		const amountInr = Number(minor) / 100;
+		const createOrder = wsConnected ?
+			payment.createOrder(minor, 'INR', { purpose: 'ppv', postId: pid }) :
+			creatorsApi.payments.razorpayCreateOrder({
+				amountMinor: Number(minor),
+				currency: 'INR',
+				notes: { purpose: 'ppv', postId: pid },
+			});
+
+		return createOrder
+			.then(order => {
+				const isLocal = order.keyId == null || order.orderId.startsWith('local_');
+				if (isLocal) {
+					const confirmLocal = wsConnected ?
+						payment.confirm(order.orderId, 'pay_local_dev', 'sig_local_dev') :
+						creatorsApi.payments.razorpayConfirm({
+							razorpayOrderId: order.orderId,
+							razorpayPaymentId: 'pay_local_dev',
+							razorpaySignature: 'sig_local_dev',
+						});
+					return confirmLocal.then(conf => {
+						updateWalletMinor(conf.balance_after_cents);
+						void refreshLedger();
+						void refreshOrders();
+						void refreshMe();
+					});
+				}
+
+				return openRazorpayCheckout({
+					amountINR: amountInr,
+					amountPaise: order.amountMinor,
+					keyId: order.keyId,
+					orderId: order.orderId,
+					description,
+					userName: user.name,
+					userEmail: user.email,
+					notes: { purpose: 'ppv', postId: pid },
+				}).then(resp => {
+					const paymentId = resp.razorpay_payment_id?.trim();
+					const signature = resp.razorpay_signature?.trim();
+					if (!paymentId || !signature) {
+						throw new Error('Razorpay did not return payment id or signature. Try again.');
+					}
+					const confirmOrderId = resp.razorpay_order_id ?? order.orderId;
+					const confirmPaid = wsConnected ?
+						payment.confirm(confirmOrderId, paymentId, signature) :
+						creatorsApi.payments.razorpayConfirm({
+							razorpayOrderId: confirmOrderId,
+							razorpayPaymentId: paymentId,
+							razorpaySignature: signature,
+						});
+					return confirmPaid.then(conf => {
+						updateWalletMinor(conf.balance_after_cents);
+						void refreshLedger();
+						void refreshOrders();
+						void refreshMe();
+					});
+				});
+			})
+			.then(() => ({ ok: true as const }))
+			.catch(err => {
+				if (isPaymentCancelled(err)) return { ok: false, cancelled: true };
+				const msg = err instanceof Error ? err.message : 'Payment failed';
+				dispatch({ type: 'SET_WALLET_ERROR', payload: msg });
+				return { ok: false, error: msg };
+			});
+	}, [authState.user, wsConnected, payment, updateWalletMinor, refreshLedger, refreshOrders, refreshMe]);
+
 	const payViaRazorpay = useCallback((
 		amountRupees: number,
 		type: Transaction['type'],
@@ -504,6 +588,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 			payViaRazorpay,
 			payExternally: payViaRazorpay,
 			tip,
+			payPpvCheckout,
 			cancelSubscription,
 			toggleAutoRenew,
 			addSubscription,
