@@ -10,6 +10,8 @@ import { useEnsureWsAuth, useWs } from '../../context/WsContext';
 import { compareMinor, formatINRFromMinor, inrRupeesToMinor } from '../../utils/money';
 import { LiveGiftsTray } from '../../components/live/LiveGiftsTray';
 import { TipModal } from '../../components/modals/TipModal';
+import { ShareSheetModal } from '../../components/modals/ShareSheetModal';
+import { useShareSheet } from '../../hooks/useShareSheet';
 import type { VirtualGift } from '../../types';
 import type { LiveWithAgora } from '../../services/liveWsTypes';
 import { formatINR } from '../../services/razorpay';
@@ -36,6 +38,7 @@ export function LiveStreamRoom() {
 	const { state: authState } = useAuth();
 	const { deductFunds, payViaRazorpay } = useWallet();
 	const { showToast } = useNotifications();
+	const { openShare, shareSheetProps } = useShareSheet();
 	const [text, setText] = useState('');
 	const [showChat, setShowChat] = useState(false);
 	const [showGifts, setShowGifts] = useState(false);
@@ -324,12 +327,12 @@ export function LiveStreamRoom() {
 						<button
 							type="button"
 							onClick={() => {
-								const url = `${window.location.origin}/live/${stream.id}`;
-								void navigator.clipboard?.writeText(url);
-								showToast('Link copied');
+								if (!streamId) return;
+								openShare({ type: 'live', targetId: streamId, variant: 'immersive' });
 							}}
-							className="w-9 h-9 rounded-xl bg-black/55 text-white backdrop-blur-sm flex items-center justify-center border border-white/10"
-							aria-label="Copy share link"
+							disabled={!streamId || (shareSheetProps.loading && shareSheetProps.isOpen)}
+							className="w-9 h-9 rounded-xl bg-black/55 text-white backdrop-blur-sm flex items-center justify-center border border-white/10 disabled:opacity-50"
+							aria-label="Share live stream"
 						>
 							<Share2 className="w-4 h-4" />
 						</button>
@@ -466,6 +469,8 @@ export function LiveStreamRoom() {
 					});
 				}}
 			/>
+
+			<ShareSheetModal {...shareSheetProps} />
 		</div>
 	);
 }

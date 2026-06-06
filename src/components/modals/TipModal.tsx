@@ -21,6 +21,8 @@ interface TipModalProps {
 	liveId?: string;
 	/** Called after a successful live tip with server `tip_total_minor`. */
 	onLiveTipSuccess?: (tipTotalMinor: string) => void;
+	/** When tipping from a post, sent to the payments API for attribution. */
+	postId?: string;
 }
 
 export function TipModal({
@@ -31,6 +33,7 @@ export function TipModal({
 	creatorAvatar,
 	liveId,
 	onLiveTipSuccess,
+	postId,
 }: TipModalProps) {
 	const { state: authState } = useAuth();
 	const { tip, tipLive } = useWallet();
@@ -58,7 +61,7 @@ export function TipModal({
 
 		const promise = isLiveTip ?
 			tipLive(String(liveId).trim(), amountCents, { idempotencyKey }) :
-			tip(String(creatorId), amountCents);
+			tip(String(creatorId), amountCents, postId);
 
 		void promise
 			.then(result => {
