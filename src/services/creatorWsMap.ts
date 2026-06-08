@@ -40,8 +40,11 @@ export function creatorProfileDtoToCreator(dto: CreatorProfileDTO, base?: Partia
 		totalEarnings: base?.totalEarnings ?? 0,
 		monthlyEarnings: base?.monthlyEarnings ?? 0,
 		tipsReceived: base?.tipsReceived ?? 0,
-		subscriberCount: base?.subscriberCount ?? 0,
 		followerCount,
+		subscriberCount:
+			typeof dto.follower_count === 'number' ? dto.follower_count :
+			typeof dto.follower_count === 'string' && /^\d+$/.test(dto.follower_count) ? Number(dto.follower_count) :
+			(base?.subscriberCount ?? 0),
 		kycStatus: base?.kycStatus ?? 'approved',
 		isKYCVerified: base?.isKYCVerified ?? true,
 		category: category0,
@@ -130,8 +133,8 @@ export function dedupeCreatorsByUserId(creators: Creator[]): Creator[] {
 const CREATOR_CARD_HTTP_CONCURRENCY = 5;
 
 /**
- * Enrich directory rows with `GET /creators/:userId` (optional Bearer) so cards match HTTP truth.
- * Failures keep the WS-derived row.
+ * Enrich directory rows with `GET /creators/:userId` (optional Bearer) so cards match HTTP truth
+ * (followerCount, profileLikeCount, follow/like flags, pricing). Failures keep the WS-derived row.
  */
 export function hydrateCreatorCardsFromHttp(creators: Creator[], signal?: AbortSignal): Promise<Creator[]> {
 	if (!creators.length) return Promise.resolve(creators);

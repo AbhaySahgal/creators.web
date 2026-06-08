@@ -62,6 +62,7 @@ export function Explore() {
 		return () => { window.clearTimeout(t); };
 	}, [search]);
 
+	// Merged: abhay's proper cancelled/abort cleanup + main's debouncedSearch dep
 	useEffect(() => {
 		if (contentState.postsWsStatus !== 'ready') return;
 		const ac = new AbortController();
@@ -111,25 +112,6 @@ export function Explore() {
 			});
 	}, [contentState.postsWsStatus, ensureWsAuth, ws, wsAuthReady, wsConnected]);
 
-	const filtered = useMemo(() => {
-		return [...wsCreators].sort((a, b) => {
-			if (sortBy === 'popular') {
-				const pa = a.followerCount || a.subscriberCount;
-				const pb = b.followerCount || b.subscriberCount;
-				return pb - pa;
-			}
-			if (sortBy === 'new') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-			return a.subscriptionPrice - b.subscriptionPrice;
-		});
-	}, [wsCreators, sortBy]);
-
-	const filteredExplorePosts = useMemo(() => {
-		if (!tagFilter) return explorePosts;
-		return explorePosts.filter(p => textHasHashtag(p.text ?? '', tagFilter));
-	}, [explorePosts, tagFilter]);
-
-	const trendingCreators = topCreators.length > 0 ? topCreators.slice(0, 10) : wsCreators.slice(0, 3);
-
 	function loadMoreDirectory() {
 		if (!wsDirCursor || contentState.postsWsStatus !== 'ready') return;
 		const ac = new AbortController();
@@ -157,6 +139,25 @@ export function Explore() {
 			.catch(() => {});
 	}
 
+	const filtered = useMemo(() => {
+		return [...wsCreators].sort((a, b) => {
+			if (sortBy === 'popular') {
+				const pa = a.followerCount || a.subscriberCount;
+				const pb = b.followerCount || b.subscriberCount;
+				return pb - pa;
+			}
+			if (sortBy === 'new') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+			return a.subscriptionPrice - b.subscriptionPrice;
+		});
+	}, [wsCreators, sortBy]);
+
+	const filteredExplorePosts = useMemo(() => {
+		if (!tagFilter) return explorePosts;
+		return explorePosts.filter(p => textHasHashtag(p.text ?? '', tagFilter));
+	}, [explorePosts, tagFilter]);
+
+	const trendingCreators = topCreators.length > 0 ? topCreators.slice(0, 10) : wsCreators.slice(0, 3);
+
 	return (
 		<Layout>
 			<div className="max-w-6xl mx-auto px-4 py-6">
@@ -176,7 +177,8 @@ export function Explore() {
 							<button
 								key={cat}
 								onClick={() => setCategory(cat)}
-								className={`shrink-0 text-sm px-3 py-1.5 rounded-xl font-medium transition-all ${category === cat ? 'bg-rose-500 text-white' : 'bg-foreground/5 text-muted hover:text-foreground hover:bg-foreground/10'
+								className={`shrink-0 text-sm px-3 py-1.5 rounded-xl font-medium transition-all ${
+									category === cat ? 'bg-rose-500 text-white' : 'bg-foreground/5 text-muted hover:text-foreground hover:bg-foreground/10'
 								}`}
 							>
 								{cat}

@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import AgoraRTC, { type IRemoteAudioTrack, type IRemoteVideoTrack } from 'agora-rtc-sdk-ng';
-import { ArrowLeft, DollarSign, Eye, Gift, Heart, MessageCircle, Share2 } from '../../components/icons';
+import { ArrowLeft, DollarSign, Eye, Gift, Heart, MessageCircle, Share2, AlertTriangle } from '../../components/icons';
 import { useLiveStream, VIRTUAL_GIFTS } from '../../context/LiveStreamContext';
 import { useAuth } from '../../context/AuthContext';
 import { useWallet } from '../../context/WalletContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useEnsureWsAuth, useWs } from '../../context/WsContext';
-import { compareMinor, inrRupeesToMinor } from '../../utils/money';
+import { compareMinor, formatINRFromMinor, inrRupeesToMinor } from '../../utils/money';
 import { LiveGiftsTray } from '../../components/live/LiveGiftsTray';
 import { TipModal } from '../../components/modals/TipModal';
+import { ReportTargetModal } from '../../components/modals/ReportTargetModal';
 import { ShareSheetModal } from '../../components/modals/ShareSheetModal';
 import { useShareSheet } from '../../hooks/useShareSheet';
 import type { VirtualGift } from '../../types';
@@ -34,7 +35,7 @@ export function LiveStreamRoom() {
 	const navigate = useNavigate();
 	const ws = useWs();
 	const ensureAuth = useEnsureWsAuth();
-	const { getStream, joinLive, leaveLiveViewer, sendGift, ready: liveWsReady } = useLiveStream();
+	const { getStream, joinLive, leaveLiveViewer, sendGift, patchLiveStats, ready: liveWsReady } = useLiveStream();
 	const { state: authState } = useAuth();
 	const { deductFunds, payViaRazorpay } = useWallet();
 	const { showToast } = useNotifications();
@@ -53,6 +54,7 @@ export function LiveStreamRoom() {
 	const [livePayload, setLivePayload] = useState<LiveWithAgora | null>(null);
 	const [joining, setJoining] = useState(true);
 	const [giftLoading, setGiftLoading] = useState(false);
+	const [showReportLive, setShowReportLive] = useState(false);
 	const chatEndRef = useRef<HTMLDivElement>(null);
 	const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -255,6 +257,10 @@ export function LiveStreamRoom() {
 	}
 
 	const totalGiftValue = stream.totalGiftValue ?? 0;
+	const tipTotalDisplay =
+		stream.tipTotalMinor && stream.tipTotalMinor !== '0' ?
+			formatINRFromMinor(stream.tipTotalMinor) :
+			null;
 
 	return (
 		<div className="fixed inset-0 z-[150] bg-overlay flex flex-col" onClick={resetControlsTimer} onTouchStart={resetControlsTimer}>
@@ -299,10 +305,17 @@ export function LiveStreamRoom() {
 					</div>
 
 					<div className="ml-auto flex items-center gap-2 shrink-0">
-						<div className="flex items-center gap-1.5 bg-amber-500/20 backdrop-blur-sm border border-amber-500/30 rounded-xl px-3 py-1.5">
-							<Gift className="w-3.5 h-3.5 text-amber-400" />
-							<span className="text-amber-400 text-xs font-semibold">{formatINR(totalGiftValue)}</span>
-						</div>
+						{tipTotalDisplay ? (
+							<div className="flex items-center gap-1.5 bg-amber-500/20 backdrop-blur-sm border border-amber-500/30 rounded-xl px-3 py-1.5">
+								<DollarSign className="w-3.5 h-3.5 text-amber-400" />
+								<span className="text-amber-400 text-xs font-semibold">{tipTotalDisplay} tips</span>
+							</div>
+						) : totalGiftValue > 0 ? (
+							<div className="flex items-center gap-1.5 bg-amber-500/20 backdrop-blur-sm border border-amber-500/30 rounded-xl px-3 py-1.5">
+								<Gift className="w-3.5 h-3.5 text-amber-400" />
+								<span className="text-amber-400 text-xs font-semibold">{formatINR(totalGiftValue)}</span>
+							</div>
+						) : null}
 
 						<button
 							type="button"
@@ -325,6 +338,17 @@ export function LiveStreamRoom() {
 						>
 							<Share2 className="w-4 h-4" />
 						</button>
+						{authState.user && streamId && (
+							<button
+								type="button"
+								onClick={() => setShowReportLive(true)}
+								className="w-9 h-9 rounded-xl bg-black/55 text-white backdrop-blur-sm flex items-center justify-center border border-white/10"
+								aria-label="Report live stream"
+								title="Report"
+							>
+								<AlertTriangle className="w-4 h-4" />
+							</button>
+						)}
 					</div>
 				</div>
 
@@ -447,8 +471,25 @@ export function LiveStreamRoom() {
 				creatorId={stream.creatorId}
 				creatorName={stream.creatorName}
 				creatorAvatar={stream.creatorAvatar}
+				liveId={stream.id}
+				onLiveTipSuccess={tipTotalMinor => {
+					if (!stream.id) return;
+					patchLiveStats({
+						live_id: stream.id,
+						viewer_count: stream.viewerCount,
+						like_count: likeCount,
+						tip_total_minor: tipTotalMinor,
+					});
+				}}
 			/>
-
+			<ReportTargetModal
+				isOpen={showReportLive}
+				onClose={() => setShowReportLive(false)}
+				targetType="live"
+				targetId={streamId ?? stream.id}
+				title="Report live stream"
+				onToast={(msg, t) => showToast(msg, t ?? 'success')}
+			/>
 			<ShareSheetModal {...shareSheetProps} />
 		</div>
 	);

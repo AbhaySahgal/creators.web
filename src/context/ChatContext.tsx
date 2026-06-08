@@ -1,11 +1,26 @@
-import React, { createContext, useContext, useReducer, useCallback, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Conversation, Message } from '../types';
 import { getStoredUser } from '../services/sessionUser';
+import { useAuth } from './AuthContext';
+import { useEnsureWsAuth, useWs } from './WsContext';
+import {
+	chatListConversations,
+	chatMuteConversation,
+	chatPinConversation,
+	mapConversationRowToConversation,
+	resolveInboxRowIdForMutePin,
+	sortInboxConversations,
+} from '../services/chatInboxService';
+import { creatorsApi } from '../services/creatorsApi';
+import type { ListConversationsResponse } from '../services/chatWsTypes';
 
 interface ChatState {
 	conversations: Conversation[];
 	messages: Record<string, Message[]>;
 	activeConversationId: string | null;
+	inboxNextCursor: string | null;
+	inboxStatus: 'idle' | 'loading' | 'ready' | 'error';
+	inboxError: string | null;
 }
 
 type ChatAction =
@@ -19,9 +34,21 @@ type ChatAction =
 	{ type: 'ADD_ROOM_MESSAGE', payload: { message: Message, selfUserId: string } } |
 	{ type: 'REPLACE_MESSAGE', payload: { conversationId: string, localId: string, message: Message } } |
 	{ type: 'UPDATE_MESSAGE', payload: { conversationId: string, id: string, patch: Partial<Message> } } |
-	{ type: 'HYDRATE', payload: ChatState };
+	{ type: 'HYDRATE', payload: ChatState } |
+	{ type: 'APPLY_INBOX_SERVER_SYNC', payload: { serverRows: Conversation[], keepConversationIds: string[], nextCursor: string | null } } |
+	{ type: 'APPEND_INBOX_SERVER_PAGE', payload: { serverRows: Conversation[], nextCursor: string | null } } |
+	{ type: 'PATCH_CONVERSATION', payload: { id: string, patch: Partial<Conversation> } } |
+	{ type: 'SET_INBOX_FETCH_STATE', payload: { status: ChatState['inboxStatus'], error: string | null } } |
+	{ type: 'RESET_CHAT_FOR_LOGOUT' };
 
-const STORAGE_KEY = 'cw.chat.v1';
+const STORAGE_KEY = 'cw.chat.v2';
+
+const emptyChatCore = (): Omit<ChatState, 'conversations' | 'messages'> => ({
+	activeConversationId: null,
+	inboxNextCursor: null,
+	inboxStatus: 'idle',
+	inboxError: null,
+});
 
 function safeParseJson<T>(raw: string | null): T | null {
 	if (!raw) return null;
@@ -34,11 +61,11 @@ function safeParseJson<T>(raw: string | null): T | null {
 
 function loadInitialChatState(): ChatState {
 	if (typeof window === 'undefined') {
-		return { conversations: [], messages: {}, activeConversationId: null };
+		return { conversations: [], messages: {}, ...emptyChatCore() };
 	}
 	const stored = safeParseJson<ChatState>(window.localStorage.getItem(STORAGE_KEY));
 	if (!stored || !Array.isArray(stored.conversations) || typeof stored.messages !== 'object') {
-		return { conversations: [], messages: {}, activeConversationId: null };
+		return { conversations: [], messages: {}, ...emptyChatCore() };
 	}
 	// Dedupe conversations by id to avoid repeated "Resume session" inserts across reloads.
 	const byId: Record<string, Conversation> = {};
@@ -53,6 +80,13 @@ function loadInitialChatState(): ChatState {
 		conversations,
 		messages: stored.messages,
 		activeConversationId: stored.activeConversationId ?? null,
+		inboxNextCursor: typeof stored.inboxNextCursor === 'string' || stored.inboxNextCursor === null ?
+			stored.inboxNextCursor ?? null :
+			null,
+		inboxStatus: stored.inboxStatus === 'loading' || stored.inboxStatus === 'ready' || stored.inboxStatus === 'error' ?
+			stored.inboxStatus :
+			'idle',
+		inboxError: typeof stored.inboxError === 'string' ? stored.inboxError : null,
 	};
 }
 
@@ -200,6 +234,74 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 			const next = existing.map(m => (m.id === id ? { ...m, ...patch } : m));
 			return { ...state, messages: { ...state.messages, [conversationId]: next } };
 		}
+		case 'APPLY_INBOX_SERVER_SYNC': {
+			const { serverRows, keepConversationIds, nextCursor } = action.payload;
+			const byId: Record<string, Conversation> = {};
+			for (const c of serverRows) {
+				byId[c.id] = c;
+			}
+			const keepSet: Record<string, true> = {};
+			for (const id of keepConversationIds) {
+				if (id) keepSet[id] = true;
+			}
+			for (const c of state.conversations) {
+				if (byId[c.id]) continue;
+				if (keepSet[c.id] || c.conversationSource === 'session') {
+					byId[c.id] = c;
+				}
+			}
+			const conversations = sortInboxConversations(Object.values(byId));
+			return {
+				...state,
+				conversations,
+				inboxNextCursor: nextCursor,
+				inboxStatus: 'ready',
+				inboxError: null,
+			};
+		}
+		case 'APPEND_INBOX_SERVER_PAGE': {
+			const { serverRows, nextCursor } = action.payload;
+			const byId: Record<string, Conversation> = {};
+			for (const c of state.conversations) {
+				byId[c.id] = c;
+			}
+			for (const c of serverRows) {
+				byId[c.id] = c;
+			}
+			const conversations = sortInboxConversations(Object.values(byId));
+			return {
+				...state,
+				conversations,
+				inboxNextCursor: nextCursor,
+				inboxStatus: 'ready',
+				inboxError: null,
+			};
+		}
+		case 'PATCH_CONVERSATION': {
+			const { id, patch } = action.payload;
+			return {
+				...state,
+				conversations: state.conversations.map(c => (c.id === id ? { ...c, ...patch } : c)),
+			};
+		}
+		case 'SET_INBOX_FETCH_STATE': {
+			const { status, error } = action.payload;
+			return {
+				...state,
+				inboxStatus: status,
+				inboxError: error,
+			};
+		}
+		case 'RESET_CHAT_FOR_LOGOUT': {
+			return {
+				conversations: [],
+				messages: {},
+				activeConversationId: null,
+				inboxNextCursor: null,
+				inboxStatus: 'idle',
+				inboxError: null,
+			};
+		}
 		default:
 			return state;
 	}
@@ -223,12 +325,36 @@ interface ChatContextValue {
 	updateMessage: (conversationId: string, id: string, patch: Partial<Message>) => void;
 	getConversationForUser: (userId: string) => Conversation | null;
 	totalUnread: number;
+	/** B7 inbox: replace list with server rows + optional session rows to keep. */
+	applyInboxServerSync: (
+		serverRows: Conversation[],
+		options: { keepConversationIds?: string[], nextCursor?: string | null }
+	) => void;
+	appendInboxServerPage: (serverRows: Conversation[], nextCursor: string | null) => void;
+	setInboxFetchState: (payload: { status: ChatState['inboxStatus'], error: string | null }) => void;
+	loadMoreInbox: () => Promise<void>;
+	muteInboxConversation: (conv: Conversation, muted: boolean) => Promise<void>;
+	pinInboxConversation: (conv: Conversation, pinned: boolean) => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
 	const [state, dispatch] = useReducer(chatReducer, initialState);
+	const { state: authState } = useAuth();
+	const ws = useWs();
+	const ensureWsAuth = useEnsureWsAuth();
+	const stateRef = useRef(state);
+	stateRef.current = state;
+
+	const prevUserIdRef = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		const id = authState.user?.id;
+		if (prevUserIdRef.current && !id) {
+			dispatch({ type: 'RESET_CHAT_FOR_LOGOUT' });
+		}
+		prevUserIdRef.current = id;
+	}, [authState.user?.id]);
 
 	// Persist chat state across reloads (keeps recent chats + messages).
 	useEffect(() => {
@@ -286,10 +412,91 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
 	const totalUnread = state.conversations.reduce((sum, c) => sum + c.unreadCount, 0);
 
+	const applyInboxServerSync = useCallback((
+		serverRows: Conversation[],
+		options?: { keepConversationIds?: string[], nextCursor?: string | null }
+	) => {
+		dispatch({
+			type: 'APPLY_INBOX_SERVER_SYNC',
+			payload: {
+				serverRows,
+				keepConversationIds: options?.keepConversationIds ?? [],
+				nextCursor: options?.nextCursor ?? null,
+			},
+		});
+	}, []);
+
+	const appendInboxServerPage = useCallback((serverRows: Conversation[], nextCursor: string | null) => {
+		dispatch({ type: 'APPEND_INBOX_SERVER_PAGE', payload: { serverRows, nextCursor } });
+	}, []);
+
+	const setInboxFetchState = useCallback((payload: { status: ChatState['inboxStatus'], error: string | null }) => {
+		dispatch({ type: 'SET_INBOX_FETCH_STATE', payload });
+	}, []);
+
+	const loadMoreInbox = useCallback(() => {
+		const cur = stateRef.current.inboxNextCursor;
+		if (!cur) return Promise.resolve();
+		const uid = authState.user?.id;
+		if (!uid) return Promise.resolve();
+		const selfName = authState.user?.name ?? 'You';
+		const selfAvatar = authState.user?.avatar ?? '';
+		const mapBody = (body: ListConversationsResponse) => {
+			const rows = (body.conversations ?? []).map(row =>
+				mapConversationRowToConversation(uid, selfName, selfAvatar, row)
+			);
+			dispatch({
+				type: 'APPEND_INBOX_SERVER_PAGE',
+				payload: { serverRows: rows, nextCursor: body.nextCursor ?? null },
+			});
+		};
+		return chatListConversations(ws, ensureWsAuth, 30, cur)
+			.then(mapBody)
+			.catch(() => creatorsApi.chat.listConversations({ limit: 30, before: cur }).then(mapBody));
+	}, [authState.user?.id, authState.user?.name, authState.user?.avatar, ws, ensureWsAuth]);
+
+	const muteInboxConversation = useCallback((conv: Conversation, muted: boolean) => {
+		const rowId = resolveInboxRowIdForMutePin(conv);
+		if (!rowId) {
+			return Promise.reject(new Error('Mute is only available for inbox-listed threads with a numeric id.'));
+		}
+		return chatMuteConversation(ws, ensureWsAuth, rowId, muted).then(() => {
+			dispatch({ type: 'PATCH_CONVERSATION', payload: { id: conv.id, patch: { muted } } });
+		}).catch(err => {
+			const msg = String(err instanceof Error ? err.message : err).toLowerCase();
+			if (msg.includes('conversation not found')) {
+				dispatch({ type: 'PATCH_CONVERSATION', payload: { id: conv.id, patch: { inboxNumericId: undefined } } });
+			}
+			return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+		});
+	}, [ws, ensureWsAuth]);
+
+	const pinInboxConversation = useCallback((conv: Conversation, pinned: boolean) => {
+		const rowId = resolveInboxRowIdForMutePin(conv);
+		if (!rowId) {
+			return Promise.reject(new Error('Pin is only available for inbox-listed threads with a numeric id.'));
+		}
+		return chatPinConversation(ws, ensureWsAuth, rowId, pinned).then(() => {
+			dispatch({ type: 'PATCH_CONVERSATION', payload: { id: conv.id, patch: { pinned } } });
+		}).catch(err => {
+			const msg = String(err instanceof Error ? err.message : err).toLowerCase();
+			if (msg.includes('conversation not found')) {
+				dispatch({ type: 'PATCH_CONVERSATION', payload: { id: conv.id, patch: { inboxNumericId: undefined } } });
+			}
+			return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+		});
+	}, [ws, ensureWsAuth]);
+
 	const value = useMemo(() => ({
 		state, sendMessage, unlockMessage, markRead,
 		markSeenUpTo, setActive, addConversation, upsertRoomMessages, addRoomMessage,
 		replaceMessage, updateMessage, getConversationForUser, totalUnread,
+		applyInboxServerSync,
+		appendInboxServerPage,
+		setInboxFetchState,
+		loadMoreInbox,
+		muteInboxConversation,
+		pinInboxConversation,
 	}), [
 		state,
 		sendMessage,
@@ -304,6 +511,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 		updateMessage,
 		getConversationForUser,
 		totalUnread,
+		applyInboxServerSync,
+		appendInboxServerPage,
+		setInboxFetchState,
+		loadMoreInbox,
+		muteInboxConversation,
+		pinInboxConversation,
 	]);
 
 	return (
