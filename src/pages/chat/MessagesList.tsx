@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, MessageCircle, Plus } from '../../components/icons';
+import { Search, MessageCircle, Plus, MoreVertical, Pin, Volume2, VolumeX } from '../../components/icons';
 import { Layout } from '../../components/layout/Layout';
 import { Avatar } from '../../components/ui/Avatar';
 import { MediaAvatar } from '../../components/ui/MediaAvatar';
@@ -8,36 +8,54 @@ import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
 import { useSessions } from '../../context/SessionsContext';
 import { useWs, useWsConnected } from '../../context/WsContext';
-import { useContent } from '../../context/ContentContext';
 import { useSubscribedCreatorsForFan } from '../../hooks/useSubscribedCreatorsForFan';
 import { useDragScroll } from '../../hooks/useDragScroll';
+import { useNotifications } from '../../context/NotificationContext';
 import { formatDistanceToNow } from '../../utils/date';
-import { isUuid, randomUuid } from '../../utils/isUuid';
+import { isUuid } from '../../utils/isUuid';
+import type { Conversation } from '../../types';
+import { resolveInboxRowIdForMutePin } from '../../services/chatInboxService';
 
 export function MessagesList() {
 	const { state: authState } = useAuth();
-	const { state: chatState, addConversation, setActive } = useChat();
+	const {
+		state: chatState,
+		setActive,
+		loadMoreInbox,
+		muteInboxConversation,
+		pinInboxConversation,
+	} = useChat();
 	const { state: sessionsState } = useSessions();
-	const { state: contentState } = useContent();
-	const { subscribedCreators, bumpHydrate } = useSubscribedCreatorsForFan({ eagerHydrate: false });
+	const { subscribedCreators } = useSubscribedCreatorsForFan({ eagerHydrate: false });
+	const { showToast } = useNotifications();
 	const newChatStripRef = useDragScroll();
 	const ws = useWs();
 	const wsConnected = useWsConnected();
 	const navigate = useNavigate();
 	const [search, setSearch] = useState('');
 	const [showNewChat, setShowNewChat] = useState(false);
+	const [inboxBusy, setInboxBusy] = useState(false);
+	const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (!menuOpenId) return;
+		const onPointerDown = (e: PointerEvent) => {
+			const el = e.target as HTMLElement | null;
+			if (!el) return;
+			if (el.closest(`[data-inbox-menu-root="${menuOpenId}"]`)) return;
+			setMenuOpenId(null);
+		};
+		document.addEventListener('pointerdown', onPointerDown, true);
+		return () => document.removeEventListener('pointerdown', onPointerDown, true);
+	}, [menuOpenId]);
 
 	const userId = authState.user?.id ?? '';
 	const isFan = authState.user?.role === 'fan';
 
 	useEffect(() => {
-		// Ensure unread counts increment while on the list (WhatsApp-like).
 		setActive(null);
 	}, [setActive]);
 
-	// If there's an active booked chat session, show a pinned "Resume session" row
-	// even if subscription state resets on reload. Do not use `timer.room_id` while a
-	// call booking is active — timers apply to calls too.
 	const activeChatRoomId =
 		sessionsState.active?.accepted.kind === 'chat' ?
 			sessionsState.active.accepted.room_id :
@@ -50,7 +68,7 @@ export function MessagesList() {
 
 	function resumeActiveSession() {
 		if (!activeChatRoomId) return;
-		navigate(`/messages/${activeChatRoomId}`);
+		void navigate(`/messages/${activeChatRoomId}`);
 	}
 
 	const conversations = chatState.conversations.filter(c => {
@@ -59,8 +77,6 @@ export function MessagesList() {
 		return c.participantNames.some(n => n.toLowerCase().includes(search.toLowerCase()));
 	});
 
-	// WhatsApp-like behavior: keep rooms joined in background so `chat|c` arrives
-	// and unread badge can update while user stays on the Messages list.
 	const joinedRoomsRef = useRef<Record<string, true>>({});
 	useEffect(() => {
 		if (!wsConnected) return;
@@ -73,19 +89,19 @@ export function MessagesList() {
 		}
 	}, [conversations, sessionsState.endedRooms, ws, wsConnected]);
 
-	useEffect(() => {
-		if (!isFan || !showNewChat) return;
-		if (contentState.postsWsStatus !== 'ready') return;
-		bumpHydrate();
-	}, [isFan, showNewChat, contentState.postsWsStatus, bumpHydrate]);
-
-	function getOtherParticipant(conv: typeof conversations[0]) {
+	function getOtherParticipant(conv: Conversation) {
 		const idx = conv.participantIds.indexOf(userId);
+		if (idx === -1) {
+			const fallback = conv.participantNames[1] ?? conv.participantNames[0] ?? 'User';
+			const fallbackAvatar = conv.participantAvatars[1] ?? conv.participantAvatars[0] ?? '';
+			const fallbackId = conv.participantIds[1] ?? conv.participantIds[0] ?? '';
+			return { name: fallback, avatar: fallbackAvatar, id: fallbackId };
+		}
 		const otherIdx = idx === 0 ? 1 : 0;
 		return {
-			name: conv.participantNames[otherIdx],
-			avatar: conv.participantAvatars[otherIdx],
-			id: conv.participantIds[otherIdx],
+			name: conv.participantNames[otherIdx] ?? 'User',
+			avatar: conv.participantAvatars[otherIdx] ?? '',
+			id: conv.participantIds[otherIdx] ?? '',
 		};
 	}
 
@@ -94,22 +110,14 @@ export function MessagesList() {
 			c.participantIds.includes(userId) && c.participantIds.includes(creatorId)
 		);
 		if (existing) {
-			navigate(`/messages/${existing.id}`);
+			void navigate(`/messages/${existing.id}`);
+			setShowNewChat(false);
 			return;
 		}
-		const convId = randomUuid();
-		addConversation({
-			id: convId,
-			participantIds: [userId, creatorId],
-			participantNames: [authState.user?.name ?? 'You', creatorName],
-			participantAvatars: [authState.user?.avatar ?? '', creatorAvatar],
-			lastMessage: '',
-			lastMessageTime: new Date().toISOString(),
-			unreadCount: 0,
-			isOnline,
-		});
-		navigate(`/messages/${convId}`);
-		setShowNewChat(false);
+		void creatorName;
+		void creatorAvatar;
+		void isOnline;
+		showToast('Messaging from here is coming soon.', 'info');
 	}
 
 	return (
@@ -122,6 +130,7 @@ export function MessagesList() {
 							type="button"
 							onClick={() => setShowNewChat(v => !v)}
 							className="w-9 h-9 bg-rose-500 hover:bg-rose-600 rounded-xl flex items-center justify-center transition-colors"
+							aria-label="New message"
 						>
 							<Plus className="w-5 h-5 text-white" />
 						</button>
@@ -173,6 +182,10 @@ export function MessagesList() {
 					/>
 				</div>
 
+				{chatState.inboxStatus === 'error' && chatState.inboxError && (
+					<p className="text-xs text-rose-400 mb-2">{chatState.inboxError}</p>
+				)}
+
 				{activeChatRoomId && !hasChatRowAlready && sessionsState.ended?.room_id !== activeChatRoomId && (
 					<button
 						type="button"
@@ -192,48 +205,141 @@ export function MessagesList() {
 					</button>
 				)}
 
-				{conversations.length === 0 ? (
+				{chatState.inboxStatus === 'loading' && conversations.length === 0 ? (
+					<div className="text-center py-16 text-muted text-sm">Loading conversations…</div>
+				) : conversations.length === 0 ? (
 					<div className="text-center py-16">
 						<div className="w-14 h-14 bg-foreground/5 rounded-2xl flex items-center justify-center mx-auto mb-3">
 							<MessageCircle className="w-6 h-6 text-muted/60" />
 						</div>
 						<p className="text-muted font-medium mb-1">No conversations yet</p>
-						<p className="text-sm text-muted/80">Subscribe to creators to start chatting</p>
+						<p className="text-sm text-muted/80">Book a chat session to appear here</p>
 					</div>
 				) : (
 					<div className="space-y-1">
 						{conversations.map(conv => {
 							const other = getOtherParticipant(conv);
+							const canMutePin = Boolean(resolveInboxRowIdForMutePin(conv));
 							return (
-								<button
+								<div
 									key={conv.id}
-									onClick={() => { void navigate(`/messages/${conv.id}`); }}
-									className="w-full flex items-center gap-3 p-3 hover:bg-foreground/5 rounded-2xl transition-colors text-left"
+									className="flex items-stretch gap-0 w-full group"
 								>
-									<Avatar src={other.avatar} alt={other.name} size="lg" isOnline={conv.isOnline} />
-									<div className="flex-1 min-w-0">
-										<div className="flex items-center justify-between mb-0.5">
-											<p className={`text-sm font-semibold truncate ${conv.unreadCount > 0 ? 'text-foreground' : 'text-foreground/80'}`}>
-												{other.name}
-											</p>
-											<p className="text-xs text-muted/80 shrink-0 ml-2">
-												{formatDistanceToNow(conv.lastMessageTime)}
-											</p>
+									<button
+										type="button"
+										onClick={() => {
+											setMenuOpenId(null);
+											void navigate(`/messages/${conv.id}`);
+										}}
+										className="flex-1 min-w-0 flex items-center gap-3 p-3 hover:bg-foreground/5 rounded-2xl transition-colors text-left"
+									>
+										<Avatar src={other.avatar} alt={other.name} size="lg" isOnline={conv.isOnline} />
+										<div className="flex-1 min-w-0">
+											<div className="flex items-center justify-between mb-0.5 gap-1">
+												<p className={`text-sm font-semibold truncate flex items-center gap-1.5 ${conv.unreadCount > 0 ? 'text-foreground' : 'text-foreground/80'}`}>
+													{conv.pinned && (
+														<Pin className="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden />
+													)}
+													{conv.muted && (
+														<VolumeX className="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden />
+													)}
+													<span className="truncate">{other.name}</span>
+												</p>
+												<p className="text-xs text-muted/80 shrink-0">
+													{formatDistanceToNow(conv.lastMessageTime)}
+												</p>
+											</div>
+											<div className="flex items-center justify-between gap-1">
+												<p className={`text-xs truncate ${conv.unreadCount > 0 ? 'text-foreground/70' : 'text-muted/80'}`}>
+													{conv.lastMessage || 'No messages yet'}
+												</p>
+												{conv.unreadCount > 0 && (
+													<span className="bg-rose-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shrink-0">
+														{conv.unreadCount}
+													</span>
+												)}
+											</div>
 										</div>
-										<div className="flex items-center justify-between">
-											<p className={`text-xs truncate ${conv.unreadCount > 0 ? 'text-foreground/70' : 'text-muted/80'}`}>
-												{conv.lastMessage || 'Start a conversation'}
-											</p>
-											{conv.unreadCount > 0 && (
-												<span className="bg-rose-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shrink-0 ml-2">
-													{conv.unreadCount}
-												</span>
-											)}
-										</div>
+									</button>
+									<div
+										className="relative shrink-0 flex items-center pr-1"
+										data-inbox-menu-root={conv.id}
+									>
+										<button
+											type="button"
+											className="p-2.5 rounded-xl text-muted hover:text-foreground hover:bg-foreground/5 opacity-80 group-hover:opacity-100 transition-opacity"
+											aria-label="Chat options"
+											aria-expanded={menuOpenId === conv.id}
+											onClick={e => {
+												e.preventDefault();
+												e.stopPropagation();
+												setMenuOpenId(v => (v === conv.id ? null : conv.id));
+											}}
+										>
+											<MoreVertical className="w-5 h-5" />
+										</button>
+										{menuOpenId === conv.id ? (
+											<div
+												role="menu"
+												className="absolute right-0 top-[calc(100%-4px)] z-30 min-w-[11rem] py-1 rounded-xl border border-border/30 bg-surface shadow-lg"
+											>
+												<button
+													type="button"
+													role="menuitem"
+													disabled={!canMutePin}
+													title={!canMutePin ? 'Pin is only available once this thread is synced from the inbox server.' : undefined}
+													className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left text-foreground hover:bg-foreground/5 disabled:opacity-40 disabled:pointer-events-none"
+													onClick={e => {
+														e.stopPropagation();
+														setMenuOpenId(null);
+														void pinInboxConversation(conv, !conv.pinned).catch(err => {
+															showToast(err instanceof Error ? err.message : 'Could not pin', 'error');
+														});
+													}}
+												>
+													<Pin className="w-4 h-4 shrink-0 text-muted" />
+													{conv.pinned ? 'Unpin chat' : 'Pin chat'}
+												</button>
+												<button
+													type="button"
+													role="menuitem"
+													disabled={!canMutePin}
+													title={!canMutePin ? 'Mute is only available once this thread is synced from the inbox server.' : undefined}
+													className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left text-foreground hover:bg-foreground/5 disabled:opacity-40 disabled:pointer-events-none"
+													onClick={e => {
+														e.stopPropagation();
+														setMenuOpenId(null);
+														void muteInboxConversation(conv, !conv.muted).catch(err => {
+															showToast(err instanceof Error ? err.message : 'Could not mute', 'error');
+														});
+													}}
+												>
+													{conv.muted ?
+														<Volume2 className="w-4 h-4 shrink-0 text-muted" /> :
+														<VolumeX className="w-4 h-4 shrink-0 text-muted" />}
+													{conv.muted ? 'Unmute notifications' : 'Mute notifications'}
+												</button>
+											</div>
+										) : null}
 									</div>
-								</button>
+								</div>
 							);
 						})}
+						{chatState.inboxNextCursor ? (
+							<div className="pt-3 flex justify-center">
+								<button
+									type="button"
+									disabled={inboxBusy}
+									onClick={() => {
+										setInboxBusy(true);
+										void loadMoreInbox().finally(() => setInboxBusy(false));
+									}}
+									className="text-sm font-medium text-rose-400 hover:text-rose-300 disabled:opacity-50"
+								>
+									{inboxBusy ? 'Loading…' : 'Load more'}
+								</button>
+							</div>
+						) : null}
 					</div>
 				)}
 			</div>
