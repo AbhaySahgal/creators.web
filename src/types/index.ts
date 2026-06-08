@@ -229,6 +229,16 @@ export interface Conversation {
 	lastMessageTime: string;
 	unreadCount: number;
 	isOnline: boolean;
+	/** From `chat /listconversations` (B7). */
+	muted?: boolean;
+	pinned?: boolean;
+	/** `server` = inbox row; omit or `session` = inserted by booked session flow. */
+	conversationSource?: 'server' | 'session';
+	/**
+	 * Numeric **chat** inbox row id for `muteconversation` / `pinconversation` (`/^\d+$/`).
+	 * Must come from the chat list payload — not the sessions booking id.
+	 */
+	inboxNumericId?: string;
 }
 
 export interface Transaction {
