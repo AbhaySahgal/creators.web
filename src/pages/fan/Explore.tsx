@@ -62,6 +62,7 @@ export function Explore() {
 		return () => { window.clearTimeout(t); };
 	}, [search]);
 
+	// Merged: abhay's proper cancelled/abort cleanup + main's debouncedSearch dep
 	useEffect(() => {
 		if (contentState.postsWsStatus !== 'ready') return;
 		const ac = new AbortController();
@@ -200,7 +201,8 @@ export function Explore() {
 							<button
 								key={cat}
 								onClick={() => setCategory(cat)}
-								className={`shrink-0 text-sm px-3 py-1.5 rounded-xl font-medium transition-all ${category === cat ? 'bg-rose-500 text-white' : 'bg-foreground/5 text-muted hover:text-foreground hover:bg-foreground/10'
+								className={`shrink-0 text-sm px-3 py-1.5 rounded-xl font-medium transition-all ${
+									category === cat ? 'bg-rose-500 text-white' : 'bg-foreground/5 text-muted hover:text-foreground hover:bg-foreground/10'
 								}`}
 							>
 								{cat}
