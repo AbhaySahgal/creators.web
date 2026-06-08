@@ -22,8 +22,11 @@ import { useNotifications } from '../../context/NotificationContext';
 import { mockCreators } from '../../data/users';
 import { ApiError, creatorsApi } from '../../services/creatorsApi';
 import { formatINR } from '../../services/razorpay';
+import { liveMyAnalytics } from '../../services/liveWsService';
+import type { LiveMyAnalyticsResponse } from '../../services/liveWsTypes';
+import { useWs, useWsConnected } from '../../context/WsContext';
 import { creatorDashboardMonthlyRupeeRows, parseMinorStringToRupees } from '../../utils/creatorDashboardMonthlyStats';
-import { inrRupeesToMinor } from '../../utils/money';
+import { formatINRFromMinor, inrRupeesToMinor } from '../../utils/money';
 
 function parseMinorToRupees(minor: string | number | null | undefined): number {
 	return parseMinorStringToRupees(minor);
@@ -84,6 +87,11 @@ export function CreatorDashboard() {
 	const [editingRate, setEditingRate] = useState(false);
 	const [rateInput, setRateInput] = useState('');
 	const [savingRate, setSavingRate] = useState(false);
+	const ws = useWs();
+	const wsConnected = useWsConnected();
+	const [liveAnalytics, setLiveAnalytics] = useState<LiveMyAnalyticsResponse | null>(null);
+	const [liveAnalyticsError, setLiveAnalyticsError] = useState<string | null>(null);
+	const [liveAnalyticsLoading, setLiveAnalyticsLoading] = useState(false);
 
 	const authedCreatorId = authState.user?.id ?? '';
 	const dashboard = authState.user?.creatorDashboard;
@@ -106,6 +114,27 @@ export function CreatorDashboard() {
 		if (authState.user?.role !== 'creator') return;
 		void refreshMe();
 	}, [authState.user?.role, authState.user?.id, refreshMe]);
+
+	useEffect(() => {
+		if (authState.user?.role !== 'creator') return;
+		const to = new Date().toISOString();
+		const from = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+		setLiveAnalyticsLoading(true);
+		setLiveAnalyticsError(null);
+		const apply = (body: LiveMyAnalyticsResponse) => setLiveAnalytics(body);
+		const fail = (e: unknown) => {
+			setLiveAnalytics(null);
+			setLiveAnalyticsError(e instanceof Error ? e.message : 'Could not load live analytics');
+		};
+		const httpFallback = () => creatorsApi.live.myAnalytics({ from, to }).then(apply).catch(fail);
+		if (wsConnected) {
+			void liveMyAnalytics(ws, { from, to }).then(apply).catch(() => httpFallback()).finally(() => {
+				setLiveAnalyticsLoading(false);
+			});
+		} else {
+			void httpFallback().finally(() => setLiveAnalyticsLoading(false));
+		}
+	}, [authState.user?.role, ws, wsConnected]);
 
 	const creatorPosts = contentState.posts.filter(p => p.creatorId === creatorUserIdForPosts);
 
@@ -328,6 +357,58 @@ export function CreatorDashboard() {
 								))}
 							</div>
 						</div>
+					)}
+				</div>
+
+				<div className="bg-surface border border-border/20 rounded-2xl p-4 mb-4">
+					<div className="flex items-center justify-between mb-3">
+						<div>
+							<h3 className="text-sm font-semibold text-foreground">Live analytics</h3>
+							<p className="text-xs text-muted mt-0.5">Last 7 days (C4)</p>
+						</div>
+						<Radio className="w-4 h-4 text-rose-400" aria-hidden />
+					</div>
+					{liveAnalyticsLoading ? (
+						<p className="text-xs text-muted py-4 text-center">Loading live stats…</p>
+					) : liveAnalyticsError ? (
+						<p className="text-xs text-rose-400 py-4 text-center">{liveAnalyticsError}</p>
+					) : liveAnalytics ? (
+						<>
+							<div className="grid grid-cols-3 gap-2 mb-3">
+								<div className="rounded-xl bg-foreground/5 p-3 text-center">
+									<p className="text-lg font-bold text-foreground">{liveAnalytics.stream_count}</p>
+									<p className="text-[10px] text-muted uppercase tracking-wide">Streams</p>
+								</div>
+								<div className="rounded-xl bg-foreground/5 p-3 text-center">
+									<p className="text-lg font-bold text-foreground">{liveAnalytics.total_viewer_count.toLocaleString()}</p>
+									<p className="text-[10px] text-muted uppercase tracking-wide">Viewers</p>
+								</div>
+								<div className="rounded-xl bg-foreground/5 p-3 text-center">
+									<p className="text-lg font-bold text-foreground">{formatINRFromMinor(liveAnalytics.total_tip_minor)}</p>
+									<p className="text-[10px] text-muted uppercase tracking-wide">Tips</p>
+								</div>
+							</div>
+							{(liveAnalytics.streams ?? []).length > 0 ? (
+								<div className="space-y-2 max-h-40 overflow-y-auto">
+									{liveAnalytics.streams.slice(0, 5).map(row => (
+										<div
+											key={row.id}
+											className="flex items-center justify-between gap-2 text-xs border border-border/15 rounded-xl px-3 py-2"
+										>
+											<span className="text-foreground font-medium truncate">{row.title || `Live ${row.id}`}</span>
+											<span className="text-muted shrink-0">{row.viewer_count} viewers</span>
+											<span className="text-amber-400 font-semibold shrink-0">
+												{formatINRFromMinor(row.tip_total_minor)}
+											</span>
+										</div>
+									))}
+								</div>
+							) : (
+								<p className="text-xs text-muted text-center py-2">No streams in this period.</p>
+							)}
+						</>
+					) : (
+						<p className="text-xs text-muted py-4 text-center">No live analytics yet.</p>
 					)}
 				</div>
 
