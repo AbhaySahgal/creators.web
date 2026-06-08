@@ -74,6 +74,13 @@ export interface PaymentTipResponse {
 	from_balance_after: string;
 }
 
+/** B8: `payment /tiplive` response. */
+export interface PaymentTipLiveResponse {
+	tip_id: string;
+	from_balance_after: string;
+	tip_total_minor: string;
+}
+
 const SVC = 'payment';
 
 export function createPaymentWs(client: WsClient) {
@@ -124,6 +131,24 @@ export function createPaymentWs(client: WsClient) {
 			const pid = String(postId ?? '').trim();
 			if (pid) args.push(pid);
 			return client.request(SVC, 'tip', args) as Promise<PaymentTipResponse>;
+		},
+		/** B8: `payment /tiplive <liveId> <amountCents> [idempotency_key=…]` */
+		tipLive(
+			liveId: string,
+			amountCents: string,
+			opts?: { idempotencyKey?: string }
+		): Promise<PaymentTipLiveResponse> {
+			const id = String(liveId ?? '').trim();
+			const amount = String(amountCents ?? '').trim();
+			if (!id) throw new Error('liveId is required');
+			if (/\s/.test(id)) throw new Error('liveId must not contain whitespace');
+			if (!/^\d+$/.test(amount) || BigInt(amount) <= 0n) {
+				throw new Error('amountCents must be a positive integer string');
+			}
+			const args: string[] = [id, amount];
+			const key = String(opts?.idempotencyKey ?? '').trim();
+			if (key) args.push(`idempotency_key=${key}`);
+			return client.request(SVC, 'tiplive', args) as Promise<PaymentTipLiveResponse>;
 		},
 		ppvUnlock(postId: string, idempotencyKey?: string): Promise<PaymentPpvUnlockResponse> {
 			const id = String(postId ?? '').trim();

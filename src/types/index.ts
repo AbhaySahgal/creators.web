@@ -41,6 +41,8 @@ export interface LiveStream {
 	status: LiveStreamStatus;
 	giftsReceived: number;
 	totalGiftValue: number;
+	/** Server `tip_total_minor` (paise string) when available from live stats. */
+	tipTotalMinor?: string;
 	chatMessages: LiveChatMessage[];
 }
 
@@ -229,6 +231,16 @@ export interface Conversation {
 	lastMessageTime: string;
 	unreadCount: number;
 	isOnline: boolean;
+	/** From `chat /listconversations` (B7). */
+	muted?: boolean;
+	pinned?: boolean;
+	/** `server` = inbox row; omit or `session` = inserted by booked session flow. */
+	conversationSource?: 'server' | 'session';
+	/**
+	 * Numeric **chat** inbox row id for `muteconversation` / `pinconversation` (`/^\d+$/`).
+	 * Must come from the chat list payload — not the sessions booking id.
+	 */
+	inboxNumericId?: string;
 }
 
 export interface Transaction {
@@ -275,6 +287,8 @@ export interface Notification {
 	data: Record<string, unknown>;
 	created_at: string;
 	read_at: string | null;
+	/** Soft-dismiss (spec); null when active */
+	deleted_at?: string | null;
 }
 
 /**

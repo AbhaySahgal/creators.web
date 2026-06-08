@@ -8,6 +8,7 @@ import type {
 	LiveEndedEvent,
 	LivePublic,
 	LiveStartedEvent,
+	LiveStatsUpdateEvent,
 	LiveVisibility,
 	LiveWithAgora,
 } from '../services/liveWsTypes';
@@ -119,6 +120,8 @@ interface OverlayState {
 	giftsReceived: number;
 	totalGiftValue: number;
 	viewerCount: number;
+	tipTotalMinor: string;
+	likeCount: number;
 }
 
 const EMPTY_OVERLAY: OverlayState = {
@@ -126,6 +129,8 @@ const EMPTY_OVERLAY: OverlayState = {
 	giftsReceived: 0,
 	totalGiftValue: 0,
 	viewerCount: 0,
+	tipTotalMinor: '0',
+	likeCount: 0,
 };
 
 interface LiveStreamState {
@@ -151,6 +156,7 @@ type Action =
 	{ type: 'APPEND_CHAT', payload: { liveId: string, message: LiveChatMessage } } |
 	{ type: 'APPEND_GIFT', payload: { liveId: string, message: LiveChatMessage, value: number } } |
 	{ type: 'SET_VIEWER_COUNT', payload: { liveId: string, count: number } } |
+	{ type: 'PATCH_LIVE_STATS', payload: LiveStatsUpdateEvent } |
 	{ type: 'CLEAR_OVERLAY', payload: { liveId: string } };
 
 function ensureOverlay(state: LiveStreamState, liveId: string): OverlayState {
@@ -218,6 +224,41 @@ function liveReducer(state: LiveStreamState, action: Action): LiveStreamState {
 				},
 			};
 		}
+		case 'PATCH_LIVE_STATS': {
+			const stats = action.payload;
+			const liveId = stats.live_id;
+			if (!liveId) return state;
+
+			const patchRow = (row: LivePublic): LivePublic => ({
+				...row,
+				viewer_count: stats.viewer_count,
+				like_count: stats.like_count,
+				tip_total_minor: stats.tip_total_minor,
+			});
+
+			const discovery = state.discovery.map(l => (l.live_id === liveId ? patchRow(l) : l));
+			const joinedLive =
+				state.joinedLive?.live_id === liveId ? patchRow(state.joinedLive) as LiveWithAgora : state.joinedLive;
+			const myLive =
+				state.myLive?.live_id === liveId ? patchRow(state.myLive) as LiveWithAgora : state.myLive;
+
+			const cur = ensureOverlay(state, liveId);
+			return {
+				...state,
+				discovery,
+				joinedLive,
+				myLive,
+				overlay: {
+					...state.overlay,
+					[liveId]: {
+						...cur,
+						viewerCount: Math.max(0, stats.viewer_count),
+						likeCount: Math.max(0, stats.like_count),
+						tipTotalMinor: stats.tip_total_minor,
+					},
+				},
+			};
+		}
 		case 'CLEAR_OVERLAY': {
 			if (!state.overlay[action.payload.liveId]) return state;
 			const next = { ...state.overlay };
@@ -256,6 +297,8 @@ interface LiveStreamContextValue {
 	/** Local-only gift line in chat overlay (not part of live WS spec). */
 	sendGift: (liveId: string, userId: string, userName: string, userAvatar: string, gift: VirtualGift) => void;
 	setLocalViewerCount: (liveId: string, count: number) => void;
+	/** Apply B8/C5 stats payload (e.g. after `tiplive` or `live|statsupdate`). */
+	patchLiveStats: (stats: LiveStatsUpdateEvent) => void;
 }
 
 const LiveStreamContext = createContext<LiveStreamContextValue | null>(null);
@@ -317,19 +360,28 @@ function publicToLegacyStream(
 	const ovl = overlay ?? EMPTY_OVERLAY;
 	const status: 'live' | 'ended' | 'offline' =
 		row.status === 'ended' ? 'ended' : 'live';
+	const viewerCount =
+		ovl.viewerCount > 0 ? ovl.viewerCount :
+		typeof row.viewer_count === 'number' ? row.viewer_count :
+		0;
+	const tipTotalMinor =
+		ovl.tipTotalMinor !== '0' ? ovl.tipTotalMinor :
+		(row.tip_total_minor != null ? String(row.tip_total_minor) : '0');
+
 	return {
 		id: row.live_id,
 		creatorId: row.creator_user_id,
 		creatorName: display.name,
 		creatorAvatar: display.avatar,
 		title: row.title,
-		viewerCount: ovl.viewerCount,
-		peakViewers: ovl.viewerCount,
+		viewerCount,
+		peakViewers: viewerCount,
 		startedAt: row.started_at,
 		endedAt: row.ended_at ?? undefined,
 		status,
 		giftsReceived: ovl.giftsReceived,
 		totalGiftValue: ovl.totalGiftValue,
+		tipTotalMinor,
 		chatMessages: ovl.chatMessages,
 	};
 }
@@ -402,6 +454,21 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 			const p = liveJoinLive(ws, liveId).then(res => {
 				dispatch({ type: 'SET_JOINED_LIVE', payload: res });
 				dispatch({ type: 'UPSERT_DISCOVERY', payload: stripAgora(res) });
+				if (
+					typeof res.viewer_count === 'number' ||
+					typeof res.like_count === 'number' ||
+					res.tip_total_minor != null
+				) {
+					dispatch({
+						type: 'PATCH_LIVE_STATS',
+						payload: {
+							live_id: res.live_id,
+							viewer_count: res.viewer_count ?? 0,
+							like_count: res.like_count ?? 0,
+							tip_total_minor: res.tip_total_minor != null ? String(res.tip_total_minor) : '0',
+						},
+					});
+				}
 				if (res.room_id) {
 					void ws.request('chat', 'joinroom', [res.room_id]).catch(() => {});
 				}
@@ -463,6 +530,11 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 		dispatch({ type: 'SET_VIEWER_COUNT', payload: { liveId, count } });
 	}, []);
 
+	const patchLiveStats = useCallback((stats: LiveStatsUpdateEvent) => {
+		if (!stats?.live_id) return;
+		dispatch({ type: 'PATCH_LIVE_STATS', payload: stats });
+	}, []);
+
 	// Subscribe to push events. `ws.on(...)` returns an unsubscribe.
 	useEffect(() => {
 		const offStarted = ws.on('live', 'started', data => {
@@ -487,6 +559,11 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 				dispatch({ type: 'SET_JOINED_LIVE', payload: null });
 			}
 		});
+		const offStatsUpdate = ws.on('live', 'statsupdate', data => {
+			const payload = data as LiveStatsUpdateEvent;
+			if (!payload?.live_id) return;
+			dispatch({ type: 'PATCH_LIVE_STATS', payload });
+		});
 		const offChat = ws.on('chat', 'c', data => {
 			const dto = data as ChatMessageDTO;
 			if (!dto?.room_id || !dto.id) return;
@@ -509,6 +586,7 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 		return () => {
 			offStarted();
 			offEnded();
+			offStatsUpdate();
 			offChat();
 		};
 	}, [ws, authState, persistHostCreds]);
@@ -613,11 +691,12 @@ export function LiveStreamProvider({ children }: { children: React.ReactNode }) 
 		appendLocalGift,
 		sendGift: appendLocalGift,
 		setLocalViewerCount,
+		patchLiveStats,
 	}), [
 		state, ready,
 		goLive, joinLive, leaveLiveViewer, endLive, refreshLives,
 		getLiveStreams, getStream,
-		appendLocalChat, appendLocalGift, setLocalViewerCount,
+		appendLocalChat, appendLocalGift, setLocalViewerCount, patchLiveStats,
 	]);
 
 	return (
