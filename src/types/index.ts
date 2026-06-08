@@ -41,6 +41,8 @@ export interface LiveStream {
 	status: LiveStreamStatus;
 	giftsReceived: number;
 	totalGiftValue: number;
+	/** Server `tip_total_minor` (paise string) when available from live stats. */
+	tipTotalMinor?: string;
 	chatMessages: LiveChatMessage[];
 }
 
