@@ -1177,6 +1177,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 			lastMessageTime: new Date().toISOString(),
 			unreadCount: 0,
 			isOnline: true,
+			conversationSource: 'session',
 		});
 	}, [
 		state.active?.accepted?.request_id,

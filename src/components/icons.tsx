@@ -41,6 +41,7 @@ export const Menu = (Fi as any)['FiMenu'] ?? Fi.FiMoreHorizontal;
 export const MessageCircle = Fi.FiMessageCircle;
 export const Zap = Fi.FiZap;
 export const MoreHorizontal = Fi.FiMoreHorizontal;
+export const MoreVertical = (Fi as any).FiMoreVertical ?? Fi.FiMoreHorizontal;
 export const Bookmark = Fi.FiBookmark;
 export const Send = Fi.FiSend;
 

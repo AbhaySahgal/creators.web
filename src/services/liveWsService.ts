@@ -1,7 +1,10 @@
 import type { WsClient } from './wsClient';
 import type {
+	LiveAnalyticsResponse,
 	LiveEndLiveResponse,
 	LiveListLiveResponse,
+	LiveMyAnalyticsResponse,
+	LiveStats,
 	LiveVisibility,
 	LiveWithAgora,
 } from './liveWsTypes';
@@ -72,4 +75,31 @@ export function liveEndLive(ws: WsClient, requestId?: string): Promise<LiveEndLi
 export function liveListLive(ws: WsClient, requestId?: string): Promise<LiveListLiveResponse> {
 	const rid = assertRequestIdTag(requestId);
 	return ws.request('live', 'listlive', [], rid).then(json => json as LiveListLiveResponse);
+}
+
+/** C5: `live /stats <liveId>` => LiveStats */
+export function liveStats(ws: WsClient, liveId: string, requestId?: string): Promise<LiveStats> {
+	const id = assertLiveId(liveId);
+	const rid = assertRequestIdTag(requestId);
+	return ws.request('live', 'stats', [id], rid).then(json => json as LiveStats);
+}
+
+/** C4: `live /analytics <liveId>` */
+export function liveAnalytics(ws: WsClient, liveId: string, requestId?: string): Promise<LiveAnalyticsResponse> {
+	const id = assertLiveId(liveId);
+	const rid = assertRequestIdTag(requestId);
+	return ws.request('live', 'analytics', [id], rid).then(json => json as LiveAnalyticsResponse);
+}
+
+/** C4: `live /myanalytics [from=…] [to=…]` */
+export function liveMyAnalytics(
+	ws: WsClient,
+	opts?: { from?: string, to?: string },
+	requestId?: string
+): Promise<LiveMyAnalyticsResponse> {
+	const args: string[] = [];
+	if (opts?.from) args.push(`from=${opts.from.trim()}`);
+	if (opts?.to) args.push(`to=${opts.to.trim()}`);
+	const rid = assertRequestIdTag(requestId);
+	return ws.request('live', 'myanalytics', args, rid).then(json => json as LiveMyAnalyticsResponse);
 }
