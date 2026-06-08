@@ -88,6 +88,7 @@ export interface InAppNotificationRow {
 	data: Record<string, unknown>;
 	created_at: string;
 	read_at: string | null;
+	deleted_at?: string | null;
 }
 
 export interface NotificationSendResponse {
@@ -117,6 +118,11 @@ export interface NotificationReadAllResponse {
 	updated: number;
 }
 
+export interface NotificationDismissAllResponse {
+	ok: true;
+	updated: number;
+}
+
 function assertRequestIdTag(tag?: string): string | undefined {
 	if (tag === undefined) return undefined;
 	const t = tag.trim();
@@ -128,6 +134,13 @@ function assertRequestIdTag(tag?: string): string | undefined {
 function assertDigitsOnly(name: string, value: string): string {
 	const v = String(value).trim();
 	if (!/^\d+$/.test(v)) throw new Error(`${name} must be digits only`);
+	return v;
+}
+
+function assertNotificationId(value: string): string {
+	const v = String(value).trim();
+	if (!v) throw new Error('notificationId is required');
+	if (/\s/.test(v)) throw new Error('notificationId must not contain spaces');
 	return v;
 }
 
@@ -181,17 +194,23 @@ export function notificationNotifyUser(
 
 export function notificationList(
 	ws: WsClient,
-	opts?: { unreadOnly?: boolean, limit?: number, beforeCursor?: string, requestIdTag?: string }
+	opts?: {
+		unreadOnly?: boolean,
+		includeDeleted?: boolean,
+		limit?: number,
+		beforeCursor?: string,
+		requestIdTag?: string,
+	}
 ): Promise<NotificationListResponse> {
 	const rid = assertRequestIdTag(opts?.requestIdTag);
 	const limit = assertLimit(opts?.limit);
 	const beforeCursor = (opts?.beforeCursor ?? '').trim() || undefined;
-	if (beforeCursor && /\s/.test(beforeCursor)) throw new Error('beforeCursor must not contain spaces');
 
 	const args: string[] = [];
+	if (opts?.includeDeleted) args.push('includedeleted');
 	if (opts?.unreadOnly) args.push('unread');
 	if (limit != null) args.push(String(limit));
-	if (beforeCursor) args.push(beforeCursor);
+	if (beforeCursor) args.push(wsQuotedArg(beforeCursor));
 	return ws.request(SVC, 'list', args, rid).then(r => r as NotificationListResponse);
 }
 
@@ -205,7 +224,7 @@ export function notificationRead(
 	opts: { notificationId: string, requestIdTag?: string }
 ): Promise<NotificationOkResponse> {
 	const rid = assertRequestIdTag(opts.requestIdTag);
-	const id = assertDigitsOnly('notificationId', opts.notificationId);
+	const id = assertNotificationId(opts.notificationId);
 	return ws.request(SVC, 'read', [id], rid).then(r => r as NotificationOkResponse);
 }
 
@@ -214,11 +233,25 @@ export function notificationUnread(
 	opts: { notificationId: string, requestIdTag?: string }
 ): Promise<NotificationOkResponse> {
 	const rid = assertRequestIdTag(opts.requestIdTag);
-	const id = assertDigitsOnly('notificationId', opts.notificationId);
+	const id = assertNotificationId(opts.notificationId);
 	return ws.request(SVC, 'unread', [id], rid).then(r => r as NotificationOkResponse);
 }
 
 export function notificationReadAll(ws: WsClient, requestIdTag?: string): Promise<NotificationReadAllResponse> {
 	const rid = assertRequestIdTag(requestIdTag);
 	return ws.request(SVC, 'readall', [], rid).then(r => r as NotificationReadAllResponse);
+}
+
+export function notificationDismiss(
+	ws: WsClient,
+	opts: { notificationId: string, requestIdTag?: string }
+): Promise<NotificationOkResponse> {
+	const rid = assertRequestIdTag(opts.requestIdTag);
+	const id = assertNotificationId(opts.notificationId);
+	return ws.request(SVC, 'dismiss', [id], rid).then(r => r as NotificationOkResponse);
+}
+
+export function notificationDismissAll(ws: WsClient, requestIdTag?: string): Promise<NotificationDismissAllResponse> {
+	const rid = assertRequestIdTag(requestIdTag);
+	return ws.request(SVC, 'dismissall', [], rid).then(r => r as NotificationDismissAllResponse);
 }
