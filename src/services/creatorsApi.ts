@@ -24,6 +24,7 @@ export type CreatorProfileResponse = User & {
 	isFollowed?: boolean,
 	profileLikeCount?: number,
 	isProfileLiked?: boolean,
+	/** Minor units as string per API. */
 	subscriptionPriceMinor?: string | null,
 	/** creators table PK when distinct from user id. */
 	creatorProfileId?: string,
@@ -61,12 +62,26 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 		catFirst;
 
 	const userId = asString(obj.userId ?? obj.user_id);
-	const creatorProfileId = asString(obj.id);
+	const rowPk = asString(obj.id);
+	const id = userId || rowPk || asString(obj.userId ?? obj.user_id);
+	const creatorProfileId = rowPk && rowPk !== userId ? rowPk : undefined;
+	const followerCount = typeof obj.followerCount === 'number' ? obj.followerCount : undefined;
+	const profileLikeCount = typeof obj.profileLikeCount === 'number' ? obj.profileLikeCount : undefined;
+	const isFollowed = typeof obj.isFollowed === 'boolean' ? obj.isFollowed : undefined;
+	const isProfileLiked = typeof obj.isProfileLiked === 'boolean' ? obj.isProfileLiked : undefined;
+	const subscriptionPriceMinor =
+		typeof obj.subscriptionPriceMinor === 'string' ? obj.subscriptionPriceMinor :
+		obj.subscriptionPriceMinor == null ? null :
+		undefined;
+	const socials =
+		obj.socials && typeof obj.socials === 'object' && !Array.isArray(obj.socials) ?
+			obj.socials as Record<string, unknown> :
+			undefined;
 
 	return {
 		...(obj as unknown as User),
-		id: userId || creatorProfileId,
-		creatorProfileId: creatorProfileId && creatorProfileId !== userId ? creatorProfileId : undefined,
+		id,
+		creatorProfileId,
 		email: asString(obj.email),
 		name: asString(obj.name),
 		username: asString(obj.username),
@@ -77,14 +92,12 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 		category: categoryField,
 		createdAt: asString(obj.createdAt ?? obj.created_at) || '',
 		categories,
-		followerCount: typeof obj.followerCount === 'number' ? obj.followerCount : undefined,
-		isFollowed: typeof obj.isFollowed === 'boolean' ? obj.isFollowed : undefined,
-		profileLikeCount: typeof obj.profileLikeCount === 'number' ? obj.profileLikeCount : undefined,
-		isProfileLiked: typeof obj.isProfileLiked === 'boolean' ? obj.isProfileLiked : undefined,
-		subscriptionPriceMinor:
-			typeof obj.subscriptionPriceMinor === 'string' ? obj.subscriptionPriceMinor :
-			obj.subscriptionPriceMinor == null ? null :
-			undefined,
+		socials,
+		followerCount,
+		isFollowed,
+		profileLikeCount,
+		isProfileLiked,
+		subscriptionPriceMinor: subscriptionPriceMinor === undefined ? undefined : subscriptionPriceMinor,
 	};
 }
 
@@ -135,6 +148,11 @@ export interface UpdateMyProfileResponse {
 	user: User;
 }
 
+export interface ChangePasswordRequest {
+	currentPassword: string;
+	newPassword: string;
+}
+
 export interface NotificationSettings {
 	messages: boolean;
 	subscriptions: boolean;
@@ -155,20 +173,45 @@ export interface UpdateNotificationSettingsResponse {
 	settings: NotificationSettings;
 }
 
-export interface ChangePasswordRequest {
-	currentPassword: string;
-	newPassword: string;
-}
+export type ReportTargetType = 'post' | 'comment' | 'message' | 'user' | 'live';
 
 export interface CreateReportRequest {
-	targetType: 'post' | 'user' | 'message';
+	targetType: ReportTargetType;
 	targetId: string;
 	reason: string;
-	description?: string;
+	/** Optional long text (max 4000 per spec). */
+	details?: string;
 }
 
-export interface CreateReportResponse {
+export type CreateReportResponse =
+	{ ok: true, reportId: string } |
+	{ ok: true, already_reported: true };
+
+export interface InAppNotificationApiRow {
+	id: string;
+	title: string;
+	body: string | null;
+	data: Record<string, unknown>;
+	read_at: string | null;
+	deleted_at: string | null;
+	created_at: string;
+}
+
+export interface MeNotificationsListParams {
+	limit?: number;
+	before?: string;
+	unreadOnly?: boolean;
+	includeDeleted?: boolean;
+}
+
+export interface MeNotificationsListResponse {
+	notifications: InAppNotificationApiRow[];
+	next_cursor: string | null;
+}
+
+export interface MeNotificationsDismissAllResponse {
 	ok: true;
+	updated: number;
 }
 
 export interface PaymentGatewayResponse {
@@ -377,6 +420,26 @@ function requestJsonAllow201<T>(
 		});
 }
 
+/** GET with Bearer when logged in; omit header for guests (public routes). */
+function requestJsonOptionalAuth<T>(
+	path: string,
+	init: Omit<RequestInit, 'body'> = {}
+): Promise<T> {
+	const url = `${apiBaseUrl()}${path.startsWith('/') ? '' : '/'}${path}`;
+	const headers = new Headers(init.headers);
+	headers.set('Accept', 'application/json');
+	const token = getSessionToken();
+	if (token) headers.set('Authorization', `Bearer ${token}`);
+
+	return globalThis.fetch(url, { ...(init as RequestInit), headers })
+		.then(res => {
+			if (res.ok) return readJsonSafe(res).then(v => v as T);
+			return readJsonSafe(res).then(errorBody => {
+				throw new ApiError(`HTTP ${res.status} for ${path}`, res.status, errorBody);
+			});
+		});
+}
+
 export const creatorsApi = {
 	auth: {
 		register(body: RegisterRequest): Promise<AuthTokenResponse> {
@@ -422,6 +485,30 @@ export const creatorsApi = {
 			},
 			update(body: UpdateNotificationSettingsRequest): Promise<UpdateNotificationSettingsResponse> {
 				return requestJson<UpdateNotificationSettingsResponse>('/me/notification-settings', { method: 'PUT', body, auth: true });
+			},
+		},
+		notifications: {
+			list(params?: MeNotificationsListParams, signal?: AbortSignal): Promise<MeNotificationsListResponse> {
+				const q = new URLSearchParams();
+				if (params?.limit != null) q.set('limit', String(params.limit));
+				if (params?.before) q.set('before', params.before);
+				if (params?.unreadOnly) q.set('unreadOnly', 'true');
+				if (params?.includeDeleted) q.set('includeDeleted', 'true');
+				const qs = q.toString();
+				const path = `/me/notifications${qs ? `?${qs}` : ''}`;
+				return requestJson<MeNotificationsListResponse>(path, { method: 'GET', auth: true, signal });
+			},
+			dismiss(notificationId: string, signal?: AbortSignal): Promise<{ ok: true }> {
+				return requestJson<{ ok: true }>(
+					`/me/notifications/${encodeURIComponent(notificationId)}`,
+					{ method: 'DELETE', auth: true, signal }
+				);
+			},
+			clearAll(signal?: AbortSignal): Promise<MeNotificationsDismissAllResponse> {
+				return requestJson<MeNotificationsDismissAllResponse>(
+					'/me/notifications/clear-all',
+					{ method: 'POST', auth: true, signal }
+				);
 			},
 		},
 	},
@@ -478,17 +565,15 @@ export const creatorsApi = {
 	creators: {
 		/** Public creator card; sends Bearer when logged in so isFollowed / isProfileLiked are accurate. */
 		getById(creatorUserId: string, signal?: AbortSignal): Promise<CreatorProfileResponse> {
-			const token = getSessionToken();
-			return requestJson<unknown>(`/creators/${encodeURIComponent(creatorUserId)}`, {
+			return requestJsonOptionalAuth<unknown>(`/creators/${encodeURIComponent(creatorUserId)}`, {
 				method: 'GET',
 				signal,
-				auth: Boolean(token),
 			}).then(normalizeCreatorProfileResponse);
 		},
 	},
 	reports: {
 		create(body: CreateReportRequest): Promise<CreateReportResponse> {
-			return requestJson<CreateReportResponse>('/reports', { method: 'POST', body, auth: true });
+			return requestJsonAllow201<CreateReportResponse>('/reports', { method: 'POST', body, auth: true });
 		},
 	},
 	share: {
