@@ -3,16 +3,17 @@ import { Users, TrendingUp, Shield, AlertTriangle, DollarSign, Star, ArrowRight 
 import { Navbar } from '../../components/layout/Navbar';
 import { ToastContainer } from '../../components/ui/Toast';
 import { mockCreators, mockUsers } from '../../data/users';
-import { mockKYCApplications, mockReports } from '../../data/transactions';
+import { mockReports } from '../../data/transactions';
+import { useAdminKycPendingCount } from '../../hooks/useAdminKyc';
 import { mockPosts } from '../../data/posts';
 import { formatINR } from '../../services/razorpay';
 
 export function AdminDashboard() {
 	const navigate = useNavigate();
+	const { pendingCount: pendingKYC } = useAdminKycPendingCount();
 
 	const totalRevenue = mockCreators.reduce((s, c) => s + c.totalEarnings, 0);
 	const platformRevenue = totalRevenue * 0.2;
-	const pendingKYC = mockKYCApplications.filter(k => k.status === 'pending').length;
 	const pendingReports = mockReports.filter(r => r.status === 'pending').length;
 	const totalCreators = mockCreators.filter(c => c.isKYCVerified).length;
 

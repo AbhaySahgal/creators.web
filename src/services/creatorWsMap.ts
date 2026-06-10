@@ -1,5 +1,5 @@
 import type { Creator } from '../types';
-import type { CreatorProfileDTO, CreatorSummaryDTO, CreatorTopDTO } from './creatorWsTypes';
+import type { CreatorProfileDTO, CreatorSummaryDTO, CreatorTopDTO, CreatorTopRowDTO } from './creatorWsTypes';
 import { creatorsApi, type CreatorProfileResponse } from './creatorsApi';
 
 function parseFollowerCount(dto: CreatorProfileDTO, base?: Partial<Creator>): number {
@@ -73,6 +73,25 @@ export function creatorSummaryToCardCreator(dto: CreatorSummaryDTO, base?: Parti
 		created_at: base?.createdAt ?? new Date().toISOString(),
 	};
 	return creatorProfileDtoToCreator(fakeProfile, base);
+}
+
+/** Map `creator /top` row → UI Creator for Explore top carousel. */
+export function creatorTopRowToCardCreator(dto: CreatorTopRowDTO, base?: Partial<Creator>): Creator {
+	const fakeProfile: CreatorProfileDTO = {
+		id: dto.id,
+		user_id: dto.user_id,
+		username: dto.username,
+		name: dto.name,
+		avatar_url: dto.avatar_url,
+		categories: dto.categories ?? [],
+		bio: null,
+		banner_url: null,
+		socials: null,
+		created_at: base?.createdAt ?? new Date().toISOString(),
+		follower_count: dto.follower_count,
+	};
+	const c = creatorProfileDtoToCreator(fakeProfile, base);
+	return { ...c, followerCount: dto.follower_count ?? c.followerCount };
 }
 
 /** Map GET /creators JSON (camelCase) → WS-shaped DTO for `creatorProfileDtoToCreator`. */
