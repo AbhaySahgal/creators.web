@@ -6,6 +6,7 @@ import { NotificationRow } from '../components/notifications/NotificationRow';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
 import { useWsAuthReady, useWsConnected } from '../context/WsContext';
+import { resolveNotificationTarget } from '../services/notificationWsService';
 
 const NOTIFICATIONS_PAGE_SIZE = 20;
 
@@ -80,20 +81,22 @@ export function Notifications() {
 				) : (
 					<>
 						<div className="rounded-2xl border border-border/20 bg-surface2 overflow-hidden">
-							{visibleNotifications.map(n => {
-								const data = n.data ?? {};
-								const link = typeof data.link === 'string' ? data.link : undefined;
-								return (
-									<NotificationRow
-										key={n.id}
-										notification={n}
-										onClick={() => {
-											markRead(n.id);
-											if (link) void navigate(link);
-										}}
-									/>
-								);
-							})}
+							{visibleNotifications.map(n => (
+								<NotificationRow
+									key={n.id}
+									notification={n}
+									onClick={() => {
+										markRead(n.id);
+										const target = resolveNotificationTarget(n);
+										if (!target) return;
+										if (target.state) {
+											void navigate(target.path, { state: target.state });
+										} else {
+											void navigate(target.path);
+										}
+									}}
+								/>
+							))}
 						</div>
 						{showLoadMore ? (
 							<div className="pt-4 flex flex-col items-center gap-1">

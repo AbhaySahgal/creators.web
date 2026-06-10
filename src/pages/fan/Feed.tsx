@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import type { NotificationFeedFocusState } from '../../services/notificationWsService';
 import { Sparkles, Zap, Users } from '../../components/icons';
 import { Layout } from '../../components/layout/Layout';
 import { PostCard } from '../../components/ui/PostCard';
@@ -14,6 +15,12 @@ export function Feed() {
 	const { isSubscribed: isWsSubscribed } = useSubscriptions();
 	const { subscribedCreators, bumpHydrate } = useSubscribedCreatorsForFan();
 	const navigate = useNavigate();
+	const location = useLocation();
+	const focusState = location.state as NotificationFeedFocusState | null;
+	const focusPostId = focusState?.focusPostId;
+	const postCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+	const focusedKeyRef = useRef<string | null>(null);
+	const didRefreshForFocusRef = useRef(false);
 	const [filter, setFilter] = useState<'all' | 'subscribed'>('all');
 	const followingRef = useDragScroll();
 
@@ -27,6 +34,31 @@ export function Feed() {
 		if (filter === 'subscribed') return isWsSubscribed(p.creatorId);
 		return true;
 	});
+
+	useEffect(() => {
+		if (!focusPostId) return;
+		const key = focusPostId;
+		if (focusedKeyRef.current === key) return;
+
+		const inFeed = contentState.posts.some(p => p.id === focusPostId);
+		if (!inFeed && !didRefreshForFocusRef.current && contentState.postsWsStatus === 'ready') {
+			didRefreshForFocusRef.current = true;
+			void refreshFeed();
+			return;
+		}
+		if (!inFeed) return;
+
+		focusedKeyRef.current = key;
+		window.setTimeout(() => {
+			const el = postCardRefs.current[focusPostId];
+			el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		}, 300);
+	}, [
+		focusPostId,
+		contentState.posts,
+		contentState.postsWsStatus,
+		refreshFeed,
+	]);
 
 	return (
 		<Layout>
@@ -117,7 +149,17 @@ export function Feed() {
 						)}
 						<div className="space-y-4">
 							{posts.map(post => (
-								<PostCard key={post.id} post={post} />
+								<div
+									key={post.id}
+									ref={el => {
+										postCardRefs.current[post.id] = el;
+									}}
+								>
+									<PostCard
+										post={post}
+										initialShowComments={focusPostId === post.id}
+									/>
+								</div>
 							))}
 						</div>
 						{filter === 'all' && contentState.feedNextCursor && (

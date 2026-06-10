@@ -1,12 +1,11 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, CheckCheck, Trash2 } from '../icons';
+import { NotificationRow } from '../notifications/NotificationRow';
+import type { Notification } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
-import type { Notification } from '../../types';
-import { formatDistanceToNow } from '../../utils/date';
-import { formatINRFromMinor } from '../../utils/money';
-import { tipMinorFromNotificationData } from '../notifications/NotificationRow';
+import { resolveNotificationTarget } from '../../services/notificationWsService';
 
 interface NotificationPanelProps {
 	onClose: () => void;
@@ -37,10 +36,16 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
 		void refresh({ unreadOnly: unreadOnly || undefined, includeDeleted: includeDeleted || undefined });
 	}, [refresh, unreadOnly, includeDeleted]);
 
-	function handleRowClick(id: string, link?: string) {
-		markRead(id);
+	function handleRowClick(notification: Notification) {
+		markRead(notification.id);
 		onClose();
-		if (link) navigate(link);
+		const target = resolveNotificationTarget(notification);
+		if (!target) return;
+		if (target.state) {
+			void navigate(target.path, { state: target.state });
+		} else {
+			void navigate(target.path);
+		}
 	}
 
 	function handleDismiss(e: React.MouseEvent, id: string) {
@@ -133,64 +138,31 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
 				) : notifications.length === 0 ? (
 					<div className="text-center py-8 text-muted text-sm">No notifications</div>
 				) : (
-					notifications.map((n: Notification) => {
-						const data = n.data ?? {};
-						const link = typeof data.link === 'string' ? data.link : undefined;
-						const fromAvatar =
-							typeof data.from_avatar === 'string' ? data.from_avatar :
-							typeof data.fromAvatar === 'string' ? data.fromAvatar :
-							undefined;
-						const isRead = n.read_at != null;
-						const kind = typeof data.kind === 'string' ? data.kind : '';
-						const tipMinor = kind === 'tip' ? tipMinorFromNotificationData(data) : null;
-						const tipSubtitle =
-							tipMinor != null ? (
-								<span className="text-amber-500 dark:text-amber-400/90">Tip · {formatINRFromMinor(tipMinor)}</span>
-							) : null;
-						return (
-							<div
-								key={n.id}
-								className={`flex gap-2 px-4 py-3 border-b border-white/5 last:border-0 ${
-									!isRead ? 'bg-rose-500/5' : ''
-								} ${n.deleted_at ? 'opacity-50' : ''}`}
-							>
+					notifications.map(n => (
+						<div
+							key={n.id}
+							className={`flex gap-1 items-stretch ${n.deleted_at ? 'opacity-50' : ''}`}
+						>
+							<div className="flex-1 min-w-0">
+								<NotificationRow
+									notification={n}
+									onClick={() => handleRowClick(n)}
+								/>
+							</div>
+							{n.deleted_at == null ? (
 								<button
 									type="button"
-									onClick={() => handleRowClick(n.id, link)}
-									className="flex flex-1 min-w-0 gap-3 text-left hover:bg-white/5 transition-colors rounded-lg -mx-1 px-1 py-0.5"
+									onClick={e => { void handleDismiss(e, n.id); }}
+									disabled={busyId === n.id}
+									className="shrink-0 self-start mt-3 mr-2 p-2 rounded-lg text-muted hover:text-rose-400 hover:bg-foreground/5 disabled:opacity-40"
+									title="Dismiss"
+									aria-label="Dismiss notification"
 								>
-									{fromAvatar ? (
-										<img src={fromAvatar} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
-									) : (
-										<div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center shrink-0">
-											<Bell className="w-4 h-4 text-white/40" />
-										</div>
-									)}
-									<div className="flex-1 min-w-0">
-										<p className={`text-xs font-medium ${isRead ? 'text-white/60' : 'text-white'} truncate`}>{n.title}</p>
-										{tipSubtitle ? (
-											<p className="text-[11px] truncate mt-0.5">{tipSubtitle}</p>
-										) : null}
-										<p className="text-xs text-white/40 truncate mt-0.5">{n.body ?? ''}</p>
-										<p className="text-[10px] text-white/25 mt-1">{formatDistanceToNow(n.created_at)}</p>
-									</div>
-									{!isRead && <div className="w-2 h-2 bg-rose-500 rounded-full mt-1 shrink-0" />}
+									<Trash2 className="w-4 h-4" />
 								</button>
-								{n.deleted_at == null ? (
-									<button
-										type="button"
-										onClick={e => { void handleDismiss(e, n.id); }}
-										disabled={busyId === n.id}
-										className="shrink-0 self-start mt-1 p-2 rounded-lg text-white/35 hover:text-rose-400 hover:bg-white/5 disabled:opacity-40"
-										title="Dismiss"
-										aria-label="Dismiss notification"
-									>
-										<Trash2 className="w-4 h-4" />
-									</button>
-								) : null}
-							</div>
-						);
-					})
+							) : null}
+						</div>
+					))
 				)}
 				{notifState.nextCursor ? (
 					<div className="p-3 border-t border-border/10">

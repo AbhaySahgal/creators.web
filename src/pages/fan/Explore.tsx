@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, TrendingUp, Star, Users, Eye, Compass } from '../../components/icons';
 import { Layout } from '../../components/layout/Layout';
@@ -8,11 +8,14 @@ import { mockCreators } from '../../data/users';
 import type { Creator } from '../../types';
 import { useContent } from '../../context/ContentContext';
 import { useLiveStream } from '../../context/LiveStreamContext';
+import { creatorsApi } from '../../services/creatorsApi';
 import {
 	creatorSummaryToCardCreator,
+	creatorTopDtoToCardCreator,
 	dedupeCreatorsByUserId,
 	hydrateCreatorCardsFromHttp,
 } from '../../services/creatorWsMap';
+import type { CreatorTopResponse } from '../../services/creatorWsTypes';
 import { useDragScroll } from '../../hooks/useDragScroll';
 import { normalizeHashtagTag, textHasHashtag } from '../../utils/hashtag';
 
@@ -21,7 +24,7 @@ const CATEGORIES = ['All', 'Fitness', 'Art', 'Tech', 'Travel', 'Music', 'Food', 
 export function Explore() {
 	const navigate = useNavigate();
 	const [searchParams, setSearchParams] = useSearchParams();
-	const { state: contentState, loadMoreExplore, creatorWsSearch } = useContent();
+	const { state: contentState, loadMoreExplore, creatorWsSearch, creatorWsTop } = useContent();
 	const explorePosts = useMemo(
 		() =>
 			contentState.explorePostIds
@@ -41,11 +44,16 @@ export function Explore() {
 	}, [wsCreators]);
 	const [wsDirCursor, setWsDirCursor] = useState<string | null>(null);
 	const [wsDirLoading, setWsDirLoading] = useState(false);
+	const [topCreators, setTopCreators] = useState<Creator[]>([]);
+	const [topCursor, setTopCursor] = useState<string | null>(null);
+	const [topLoading, setTopLoading] = useState(false);
 	const { getLiveStreams } = useLiveStream();
 	const liveStreams = getLiveStreams();
 	const liveRef = useDragScroll();
 	const trendingRef = useDragScroll();
 	const allRef = useDragScroll();
+
+	const showTrending = !debouncedSearch && category === 'All';
 
 	useEffect(() => {
 		const t = window.setTimeout(() => {
@@ -91,14 +99,63 @@ export function Explore() {
 		};
 	}, [contentState.postsWsStatus, debouncedSearch, category, creatorWsSearch]);
 
-	// Kept abhay's full version (has hydrateCreatorCardsFromHttp + abort + wsCreatorsRef).
-	// main's duplicate below the trendingCreators line was removed.
+	const loadTrending = useCallback((cursor?: string, append = false) => {
+		if (contentState.postsWsStatus !== 'ready' || !showTrending) return;
+		setTopLoading(true);
+
+		const applyTop = (r: CreatorTopResponse) => {
+			const mapped = r.creators.map(d => creatorTopDtoToCardCreator(d, mockCreators[0]));
+			setTopCreators(prev => append ? [...prev, ...mapped] : mapped);
+			setTopCursor(r.nextCursor ?? null);
+		};
+
+		void creatorWsTop({ limit: 10, cursor })
+			.then(applyTop)
+			.catch(() =>
+				creatorsApi.creators.top({ limit: 10, cursor })
+					.then(applyTop)
+					.catch(() => {
+						if (!append) {
+							setTopCreators([]);
+							setTopCursor(null);
+						}
+					})
+			)
+			.finally(() => setTopLoading(false));
+	}, [contentState.postsWsStatus, showTrending, creatorWsTop]);
+
+	useEffect(() => {
+		if (!showTrending) {
+			setTopCreators([]);
+			setTopCursor(null);
+			return;
+		}
+		loadTrending(undefined, false);
+	}, [showTrending, contentState.postsWsStatus, loadTrending]);
+
+	const filtered = useMemo(() => {
+		return [...wsCreators].sort((a, b) => {
+			if (sortBy === 'popular') {
+				const pa = a.followerCount || a.subscriberCount;
+				const pb = b.followerCount || b.subscriberCount;
+				return pb - pa;
+			}
+			if (sortBy === 'new') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+			return a.subscriptionPrice - b.subscriptionPrice;
+		});
+	}, [wsCreators, sortBy]);
+
+	const filteredExplorePosts = useMemo(() => {
+		if (!tagFilter) return explorePosts;
+		return explorePosts.filter(p => textHasHashtag(p.text ?? '', tagFilter));
+	}, [explorePosts, tagFilter]);
+
 	function loadMoreDirectory() {
 		if (!wsDirCursor || contentState.postsWsStatus !== 'ready') return;
 		const ac = new AbortController();
 		const cat = category === 'All' ? undefined : category;
 		const q = debouncedSearch.trim() || undefined;
-		void creatorWsSearch({ q, category: cat, limit: 30, beforeCursor: wsDirCursor })
+		void creatorWsSearch({ q, category: cat, limit: 30, cursor: wsDirCursor })
 			.then(r => {
 				const nextRows = r.creators.map(d => creatorSummaryToCardCreator(d, mockCreators[0]));
 				const prev = wsCreatorsRef.current;
@@ -120,24 +177,10 @@ export function Explore() {
 			.catch(() => {});
 	}
 
-	const filtered = useMemo(() => {
-		return [...wsCreators].sort((a, b) => {
-			if (sortBy === 'popular') {
-				const pa = a.followerCount || a.subscriberCount;
-				const pb = b.followerCount || b.subscriberCount;
-				return pb - pa;
-			}
-			if (sortBy === 'new') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-			return a.subscriptionPrice - b.subscriptionPrice;
-		});
-	}, [wsCreators, sortBy]);
-
-	const filteredExplorePosts = useMemo(() => {
-		if (!tagFilter) return explorePosts;
-		return explorePosts.filter(p => textHasHashtag(p.text ?? '', tagFilter));
-	}, [explorePosts, tagFilter]);
-
-	const trendingCreators = wsCreators.slice(0, 3);
+	function loadMoreTrending() {
+		if (!topCursor) return;
+		loadTrending(topCursor, true);
+	}
 
 	return (
 		<Layout>
@@ -213,7 +256,7 @@ export function Explore() {
 					) : null}
 				</div>
 
-				{!debouncedSearch && category === 'All' && liveStreams.length > 0 && (
+				{showTrending && liveStreams.length > 0 && (
 					<div className="mb-8">
 						<div className="flex items-center gap-2 mb-4">
 							<h2 className="font-semibold text-foreground text-sm">Live Now</h2>
@@ -246,25 +289,44 @@ export function Explore() {
 					</div>
 				)}
 
-				{!debouncedSearch && category === 'All' && (
+				{showTrending && (
 					<div className="mb-8">
 						<div className="flex items-center gap-2 mb-4">
 							<TrendingUp className="w-4 h-4 text-rose-400" />
 							<h2 className="font-semibold text-foreground text-sm">Trending Now</h2>
+							{topLoading && <span className="text-xs text-muted">Loading…</span>}
 						</div>
-						<div ref={trendingRef} className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4">
-							{trendingCreators.map((creator, idx) => (
-								<div key={creator.id} className="relative flex-shrink-0 w-56 sm:w-64 md:w-72">
-									{idx === 0 && (
-										<div className="absolute -top-2 -right-2 z-10 bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5">
-											<Star className="w-2.5 h-2.5 fill-white" />
-											#1 Trending
+						{topCreators.length > 0 ? (
+							<>
+								<div ref={trendingRef} className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4">
+									{topCreators.map(creator => (
+										<div key={`${creator.id}-${creator.rank ?? 0}`} className="relative flex-shrink-0 w-56 sm:w-64 md:w-72">
+											{creator.rank === 1 && (
+												<div className="absolute -top-2 -right-2 z-10 bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5">
+													<Star className="w-2.5 h-2.5 fill-white" />
+													#1 Trending
+												</div>
+											)}
+											<CreatorCard creator={creator} />
 										</div>
-									)}
-									<CreatorCard creator={creator} />
+									))}
 								</div>
-							))}
-						</div>
+								{topCursor ? (
+									<div className="mt-3 text-center">
+										<button
+											type="button"
+											onClick={() => { loadMoreTrending(); }}
+											disabled={topLoading}
+											className="text-sm font-medium text-rose-400 hover:text-rose-300 disabled:opacity-50"
+										>
+											Load more trending
+										</button>
+									</div>
+								) : null}
+							</>
+						) : !topLoading ? (
+							<p className="text-xs text-muted">No trending creators right now.</p>
+						) : null}
 					</div>
 				)}
 
