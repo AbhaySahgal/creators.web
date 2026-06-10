@@ -1,5 +1,5 @@
 import type { Creator } from '../types';
-import type { CreatorProfileDTO, CreatorSummaryDTO } from './creatorWsTypes';
+import type { CreatorProfileDTO, CreatorSummaryDTO, CreatorTopDTO } from './creatorWsTypes';
 import { creatorsApi, type CreatorProfileResponse } from './creatorsApi';
 
 function parseFollowerCount(dto: CreatorProfileDTO, base?: Partial<Creator>): number {
@@ -59,6 +59,7 @@ export function creatorProfileDtoToCreator(dto: CreatorProfileDTO, base?: Partia
 		isAgeVerified: base?.isAgeVerified ?? true,
 		status: base?.status ?? 'active',
 		walletBalanceMinor: base?.walletBalanceMinor ?? '0',
+		isNsfw: dto.is_nsfw === true,
 	};
 }
 
@@ -95,6 +96,16 @@ export function httpCreatorProfileToDto(h: CreatorProfileResponse): CreatorProfi
 		is_profile_liked: h.isProfileLiked,
 		follower_count: h.followerCount,
 		is_followed: h.isFollowed,
+	};
+}
+
+/** B4: ranked trending row from `creator /top`. */
+export function creatorTopDtoToCardCreator(dto: CreatorTopDTO, base?: Partial<Creator>): Creator {
+	const c = creatorSummaryToCardCreator(dto, base);
+	return {
+		...c,
+		followerCount: Number.isFinite(dto.follower_count) ? Math.max(0, dto.follower_count) : c.followerCount,
+		rank: dto.rank,
 	};
 }
 

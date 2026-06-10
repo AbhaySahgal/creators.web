@@ -328,7 +328,10 @@ export function PostCommentThread({ post, commentNext, onCommentPosted }: PostCo
 				});
 			},
 			expand: (threadRootId: string) => {
-				setExpandedThreads(p => ({ ...p, [threadRootId]: true }));
+				setExpandedThreads(p => {
+					if (p[threadRootId]) return p;
+					return { ...p, [threadRootId]: true };
+				});
 			},
 		}),
 		[expandedThreads]

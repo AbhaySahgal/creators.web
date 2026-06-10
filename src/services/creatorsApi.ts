@@ -9,6 +9,11 @@ import type {
 	ExportDataResponse,
 	StreamGuidelinesResponse,
 } from './accountTypes';
+import {
+	normalizeCreatorListResponse,
+	normalizeCreatorTopResponse,
+} from './creatorWsService';
+import type { CreatorListResponse, CreatorTopResponse } from './creatorWsTypes';
 import { ZERO_MINOR } from '../utils/money';
 import { getSessionToken, setSessionToken } from './sessionToken';
 import type { ListConversationsResponse } from './chatWsTypes';
@@ -731,6 +736,34 @@ export const creatorsApi = {
 		},
 	},
 	creators: {
+		/** B1 mirror: GET /creators?q=&category=&limit=&cursor= */
+		list(
+			params: { q?: string, category?: string, limit?: number, cursor?: string } = {},
+			signal?: AbortSignal
+		): Promise<CreatorListResponse> {
+			const qs = new URLSearchParams();
+			if (params.q?.trim()) qs.set('q', params.q.trim());
+			if (params.category?.trim()) qs.set('category', params.category.trim());
+			if (params.limit != null) qs.set('limit', String(Math.min(50, Math.max(1, params.limit))));
+			if (params.cursor?.trim()) qs.set('cursor', params.cursor.trim());
+			const query = qs.toString();
+			const path = query ? `/creators?${query}` : '/creators';
+			return requestJson<unknown>(path, { method: 'GET', auth: true, signal })
+				.then(normalizeCreatorListResponse);
+		},
+		/** B4 mirror: GET /creators/top */
+		top(
+			params: { limit?: number, cursor?: string } = {},
+			signal?: AbortSignal
+		): Promise<CreatorTopResponse> {
+			const qs = new URLSearchParams();
+			if (params.limit != null) qs.set('limit', String(Math.min(50, Math.max(1, params.limit))));
+			if (params.cursor?.trim()) qs.set('cursor', params.cursor.trim());
+			const query = qs.toString();
+			const path = query ? `/creators/top?${query}` : '/creators/top';
+			return requestJson<unknown>(path, { method: 'GET', auth: true, signal })
+				.then(normalizeCreatorTopResponse);
+		},
 		/** Public creator card; sends Bearer when logged in so isFollowed / isProfileLiked are accurate. */
 		getById(creatorUserId: string, signal?: AbortSignal): Promise<CreatorProfileResponse> {
 			return requestJsonOptionalAuth<unknown>(`/creators/${encodeURIComponent(creatorUserId)}`, {

@@ -22,9 +22,14 @@ import { tokenizeHashtags } from '../../utils/hashtag';
 interface PostCardProps {
 	post: Post;
 	showCreatorLink?: boolean;
+	initialShowComments?: boolean;
 }
 
-export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
+export function PostCard({
+	post,
+	showCreatorLink = true,
+	initialShowComments = false,
+}: PostCardProps) {
 	const { state: authState } = useAuth();
 	const {
 		toggleLike,
@@ -40,7 +45,7 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 	const { showToast } = useNotifications();
 	const { openShare, shareSheetProps } = useShareSheet();
 	const navigate = useNavigate();
-	const [showComments, setShowComments] = useState(false);
+	const [showComments, setShowComments] = useState(initialShowComments);
 	const [showTipModal, setShowTipModal] = useState(false);
 	const [showPPVModal, setShowPPVModal] = useState(false);
 	const [showMenu, setShowMenu] = useState(false);
@@ -68,6 +73,10 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 	const [bookmarkPopKey, setBookmarkPopKey] = useState(0);
 	const [likePopKey, setLikePopKey] = useState(0);
 	const prevLikedRef = useRef(isLiked);
+
+	useEffect(() => {
+		if (initialShowComments) setShowComments(true);
+	}, [initialShowComments, post.id]);
 
 	useEffect(() => {
 		if (!showComments) return;
@@ -360,7 +369,11 @@ export function PostCard({ post, showCreatorLink = true }: PostCardProps) {
 
 			{showComments && (
 				<div className="px-3 sm:px-4 pb-3 sm:pb-4 pt-3 border-t border-border/15 dark:border-border/20 bg-foreground/[0.02] dark:bg-black/20">
-					<PostCommentThread post={post} commentNext={commentNext} onCommentPosted={() => setIsCommented(true)} />
+					<PostCommentThread
+						post={post}
+						commentNext={commentNext}
+						onCommentPosted={() => setIsCommented(true)}
+					/>
 				</div>
 			)}
 
