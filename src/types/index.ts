@@ -141,6 +141,8 @@ export interface Creator extends User {
 	/** Public creator `/get` — distinct followers (not paying subscribers). */
 	followerCount: number;
 	kycStatus: KYCStatus;
+	/** Set when admin rejects KYC (push or resubmit flow). */
+	kycRejectionReason?: string;
 	isKYCVerified: boolean;
 	category: string;
 	isOnline: boolean;

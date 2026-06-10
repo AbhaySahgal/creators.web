@@ -2,7 +2,9 @@ import type { CreatorsMultiplexWs } from './creatorsMultiplexWs';
 import type { User } from '../types';
 import type { WsClient } from './wsClient';
 import { normalizeMeUser, type CreateReportResponse, type ReportTargetType } from './creatorsApi';
+import type { KycSubmitRequest, KycSubmitResponse } from './kycTypes';
 import type { UserAuthenticateResponse } from './userWsTypes';
+import { buildKycSubmitWsArgs } from './kycMap';
 
 export interface UserUpdateProfileOpts {
 	name?: string;
@@ -68,6 +70,19 @@ export function userWsUpdateProfile(
 
 export function userWsLogout(client: CreatorsMultiplexWs): Promise<void> {
 	return client.send('user', '/logout').then(() => {});
+}
+
+export function userWsKycSubmitWs(client: WsClient, body: KycSubmitRequest): Promise<KycSubmitResponse> {
+	const args = buildKycSubmitWsArgs(body);
+	if (args.length < 3) throw new Error('fullName and document asset ids are required');
+	return client.request('user', 'kycsubmit', args) as Promise<KycSubmitResponse>;
+}
+
+export function userWsKycSubmitMultiplex(client: CreatorsMultiplexWs, body: KycSubmitRequest): Promise<KycSubmitResponse> {
+	const args = buildKycSubmitWsArgs(body);
+	if (args.length < 3) throw new Error('fullName and document asset ids are required');
+	const cmd = `/kycsubmit ${args.join(' ')}`;
+	return client.send('user', cmd).then(json => json as KycSubmitResponse);
 }
 
 function assertReportTargetType(v: string): ReportTargetType {

@@ -5,6 +5,7 @@ import type {
 	CreatorListResponse,
 	CreatorSummaryDTO,
 	CreatorTopDTO,
+	CreatorTopPrimaryResponse,
 	CreatorTopResponse,
 	CreatorUpsertResponse,
 } from './creatorWsTypes';
@@ -224,4 +225,11 @@ export function creatorContentStreams(
 	const command = parts[0].slice(1);
 	const args = parts.slice(1);
 	return ws.request('creator', command, args, requestId).then(json => json as ContentStreamsResponse);
+}
+
+export function creatorWsTopPrimary(ws: WsClient, opts?: { limit?: number, cursor?: string }): Promise<CreatorTopPrimaryResponse> {
+	const lim = Math.min(50, Math.max(1, opts?.limit ?? 10));
+	const args: string[] = [`limit=${lim}`];
+	if (opts?.cursor?.trim()) args.push(`cursor=${opts.cursor.trim()}`);
+	return ws.request('creator', 'top', args).then(json => json as CreatorTopPrimaryResponse);
 }

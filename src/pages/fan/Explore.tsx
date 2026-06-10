@@ -8,13 +8,16 @@ import { mockCreators } from '../../data/users';
 import type { Creator } from '../../types';
 import { useContent } from '../../context/ContentContext';
 import { useLiveStream } from '../../context/LiveStreamContext';
+import { useEnsureWsAuth, useWs, useWsAuthReady, useWsConnected } from '../../context/WsContext';
 import { creatorsApi } from '../../services/creatorsApi';
 import {
 	creatorSummaryToCardCreator,
 	creatorTopDtoToCardCreator,
+	creatorTopRowToCardCreator,
 	dedupeCreatorsByUserId,
 	hydrateCreatorCardsFromHttp,
 } from '../../services/creatorWsMap';
+import { creatorWsTopPrimary } from '../../services/creatorWsService';
 import type { CreatorTopResponse } from '../../services/creatorWsTypes';
 import { useDragScroll } from '../../hooks/useDragScroll';
 import { normalizeHashtagTag, textHasHashtag } from '../../utils/hashtag';
@@ -38,15 +41,20 @@ export function Explore() {
 	const [sortBy, setSortBy] = useState<'popular' | 'new' | 'price'>('popular');
 	const tagFilter = normalizeHashtagTag(searchParams.get('tag') ?? '');
 	const [wsCreators, setWsCreators] = useState<Creator[]>([]);
+	const [topCreators, setTopCreators] = useState<Creator[]>([]);
+	const [topCursor, setTopCursor] = useState<string | null>(null);
+	const [topLoading, setTopLoading] = useState(false);
+	const [isCuratedTop, setIsCuratedTop] = useState(false);
 	const wsCreatorsRef = useRef<Creator[]>([]);
 	useEffect(() => {
 		wsCreatorsRef.current = wsCreators;
 	}, [wsCreators]);
 	const [wsDirCursor, setWsDirCursor] = useState<string | null>(null);
 	const [wsDirLoading, setWsDirLoading] = useState(false);
-	const [topCreators, setTopCreators] = useState<Creator[]>([]);
-	const [topCursor, setTopCursor] = useState<string | null>(null);
-	const [topLoading, setTopLoading] = useState(false);
+	const ws = useWs();
+	const wsConnected = useWsConnected();
+	const wsAuthReady = useWsAuthReady();
+	const ensureWsAuth = useEnsureWsAuth();
 	const { getLiveStreams } = useLiveStream();
 	const liveStreams = getLiveStreams();
 	const liveRef = useDragScroll();
@@ -62,7 +70,6 @@ export function Explore() {
 		return () => { window.clearTimeout(t); };
 	}, [search]);
 
-	// Merged: abhay's proper cancelled/abort cleanup + main's debouncedSearch dep
 	useEffect(() => {
 		if (contentState.postsWsStatus !== 'ready') return;
 		const ac = new AbortController();
@@ -99,17 +106,16 @@ export function Explore() {
 		};
 	}, [contentState.postsWsStatus, debouncedSearch, category, creatorWsSearch]);
 
-	const loadTrending = useCallback((cursor?: string, append = false) => {
-		if (contentState.postsWsStatus !== 'ready' || !showTrending) return;
+	const loadRankedTrending = useCallback((cursor?: string, append = false) => {
 		setTopLoading(true);
-
 		const applyTop = (r: CreatorTopResponse) => {
 			const mapped = r.creators.map(d => creatorTopDtoToCardCreator(d, mockCreators[0]));
+			setIsCuratedTop(false);
 			setTopCreators(prev => append ? [...prev, ...mapped] : mapped);
 			setTopCursor(r.nextCursor ?? null);
 		};
 
-		void creatorWsTop({ limit: 10, cursor })
+		return creatorWsTop({ limit: 10, cursor })
 			.then(applyTop)
 			.catch(() =>
 				creatorsApi.creators.top({ limit: 10, cursor })
@@ -122,33 +128,86 @@ export function Explore() {
 					})
 			)
 			.finally(() => setTopLoading(false));
-	}, [contentState.postsWsStatus, showTrending, creatorWsTop]);
+	}, [creatorWsTop]);
+
+	const loadTrending = useCallback((cursor?: string, append = false) => {
+		if (contentState.postsWsStatus !== 'ready' || !showTrending) return;
+
+		if (isCuratedTop && cursor && wsConnected && wsAuthReady) {
+			setTopLoading(true);
+			void ensureWsAuth()
+				.then(() => creatorWsTopPrimary(ws, { limit: 10, cursor }))
+				.then(r => {
+					const rows = (r.creators ?? []).map(d => creatorTopRowToCardCreator(d, mockCreators[0]));
+					setTopCreators(prev => append ? [...prev, ...rows] : rows);
+					setTopCursor(r.nextCursor ?? null);
+				})
+				.catch(() => {
+					if (!append) {
+						setTopCreators([]);
+						setTopCursor(null);
+					}
+				})
+				.finally(() => setTopLoading(false));
+			return;
+		}
+
+		if (!isCuratedTop || cursor) {
+			void loadRankedTrending(cursor, append);
+		}
+	}, [
+		contentState.postsWsStatus,
+		showTrending,
+		isCuratedTop,
+		wsConnected,
+		wsAuthReady,
+		ensureWsAuth,
+		ws,
+		loadRankedTrending,
+	]);
 
 	useEffect(() => {
 		if (!showTrending) {
 			setTopCreators([]);
 			setTopCursor(null);
+			setIsCuratedTop(false);
 			return;
 		}
-		loadTrending(undefined, false);
-	}, [showTrending, contentState.postsWsStatus, loadTrending]);
+		if (contentState.postsWsStatus !== 'ready') return;
 
-	const filtered = useMemo(() => {
-		return [...wsCreators].sort((a, b) => {
-			if (sortBy === 'popular') {
-				const pa = a.followerCount || a.subscriberCount;
-				const pb = b.followerCount || b.subscriberCount;
-				return pb - pa;
-			}
-			if (sortBy === 'new') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-			return a.subscriptionPrice - b.subscriptionPrice;
-		});
-	}, [wsCreators, sortBy]);
+		if (wsConnected && wsAuthReady) {
+			setTopLoading(true);
+			void ensureWsAuth()
+				.then(() => creatorWsTopPrimary(ws, { limit: 10 }))
+				.then(r => {
+					const rows = (r.creators ?? []).map(d => creatorTopRowToCardCreator(d, mockCreators[0]));
+					if (rows.length > 0) {
+						setIsCuratedTop(true);
+						setTopCreators(rows);
+						setTopCursor(r.nextCursor ?? null);
+						setTopLoading(false);
+						return;
+					}
+					setIsCuratedTop(false);
+					return loadRankedTrending(undefined, false);
+				})
+				.catch(() => {
+					setIsCuratedTop(false);
+					return loadRankedTrending(undefined, false);
+				});
+			return;
+		}
 
-	const filteredExplorePosts = useMemo(() => {
-		if (!tagFilter) return explorePosts;
-		return explorePosts.filter(p => textHasHashtag(p.text ?? '', tagFilter));
-	}, [explorePosts, tagFilter]);
+		void loadRankedTrending(undefined, false);
+	}, [
+		showTrending,
+		contentState.postsWsStatus,
+		wsConnected,
+		wsAuthReady,
+		ensureWsAuth,
+		ws,
+		loadRankedTrending,
+	]);
 
 	function loadMoreDirectory() {
 		if (!wsDirCursor || contentState.postsWsStatus !== 'ready') return;
@@ -182,6 +241,26 @@ export function Explore() {
 		loadTrending(topCursor, true);
 	}
 
+	const filtered = useMemo(() => {
+		return [...wsCreators].sort((a, b) => {
+			if (sortBy === 'popular') {
+				const pa = a.followerCount || a.subscriberCount;
+				const pb = b.followerCount || b.subscriberCount;
+				return pb - pa;
+			}
+			if (sortBy === 'new') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+			return a.subscriptionPrice - b.subscriptionPrice;
+		});
+	}, [wsCreators, sortBy]);
+
+	const filteredExplorePosts = useMemo(() => {
+		if (!tagFilter) return explorePosts;
+		return explorePosts.filter(p => textHasHashtag(p.text ?? '', tagFilter));
+	}, [explorePosts, tagFilter]);
+
+	const trendingCreators =
+		topCreators.length > 0 ? topCreators : wsCreators.slice(0, 3);
+
 	return (
 		<Layout>
 			<div className="max-w-6xl mx-auto px-4 py-6">
@@ -192,7 +271,7 @@ export function Explore() {
 							value={search}
 							onChange={e => setSearch(e.target.value)}
 							placeholder="Search creators by name, category..."
-							className="w-full bg-input border border-border/20 rounded-2xl pl-11 pr-4 py-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring/40 transition-colors"
+							className="w-full bg-input border border-border/20 rounded-2xl pl-11 pr-4 py-3 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-border/40 transition-colors"
 						/>
 					</div>
 
@@ -293,25 +372,28 @@ export function Explore() {
 					<div className="mb-8">
 						<div className="flex items-center gap-2 mb-4">
 							<TrendingUp className="w-4 h-4 text-rose-400" />
-							<h2 className="font-semibold text-foreground text-sm">Trending Now</h2>
+							<h2 className="font-semibold text-foreground text-sm">
+								{isCuratedTop ? 'Top Creators' : 'Trending Now'}
+							</h2>
 							{topLoading && <span className="text-xs text-muted">Loading…</span>}
 						</div>
-						{topCreators.length > 0 ? (
+						{trendingCreators.length > 0 ? (
 							<>
 								<div ref={trendingRef} className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4">
-									{topCreators.map(creator => (
-										<div key={`${creator.id}-${creator.rank ?? 0}`} className="relative flex-shrink-0 w-56 sm:w-64 md:w-72">
-											{creator.rank === 1 && (
+									{trendingCreators.map((creator, idx) => (
+										<div key={`${creator.id}-${creator.rank ?? idx}`} className="relative flex-shrink-0 w-56 sm:w-64 md:w-72">
+											{(isCuratedTop ? idx < 3 : creator.rank === 1) && (
 												<div className="absolute -top-2 -right-2 z-10 bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5">
 													<Star className="w-2.5 h-2.5 fill-white" />
-													#1 Trending
+													#{isCuratedTop ? idx + 1 : creator.rank}
+													{isCuratedTop ? ' Top' : ' Trending'}
 												</div>
 											)}
 											<CreatorCard creator={creator} />
 										</div>
 									))}
 								</div>
-								{topCursor ? (
+								{topCursor && topCreators.length > 0 ? (
 									<div className="mt-3 text-center">
 										<button
 											type="button"
@@ -319,7 +401,7 @@ export function Explore() {
 											disabled={topLoading}
 											className="text-sm font-medium text-rose-400 hover:text-rose-300 disabled:opacity-50"
 										>
-											Load more trending
+											Load more {isCuratedTop ? 'top' : 'trending'}
 										</button>
 									</div>
 								) : null}
