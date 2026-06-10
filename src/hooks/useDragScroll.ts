@@ -1,8 +1,8 @@
 import { useRef, useEffect, useCallback } from 'react';
 
 /**
- * Enables click-and-drag horizontal scrolling on desktop browsers.
- * Returns a ref to attach to the scrollable container.
+ * Desktop click-and-drag horizontal scrolling (mouse only).
+ * Touch devices use native overflow scrolling on the same element.
  */
 export function useDragScroll<T extends HTMLElement = HTMLDivElement>() {
 	const ref = useRef<T | null>(null);
@@ -13,7 +13,7 @@ export function useDragScroll<T extends HTMLElement = HTMLDivElement>() {
 		if (!el) return;
 		state.current.isDown = true;
 		state.current.moved = false;
-		state.current.startX = e.pageX - el.offsetLeft;
+		state.current.startX = e.pageX;
 		state.current.scrollLeft = el.scrollLeft;
 		el.style.cursor = 'grabbing';
 	}, []);
@@ -23,8 +23,7 @@ export function useDragScroll<T extends HTMLElement = HTMLDivElement>() {
 		const el = ref.current;
 		if (!el) return;
 		e.preventDefault();
-		const x = e.pageX - el.offsetLeft;
-		const walk = x - state.current.startX;
+		const walk = e.pageX - state.current.startX;
 		if (Math.abs(walk) > 3) state.current.moved = true;
 		el.scrollLeft = state.current.scrollLeft - walk;
 	}, []);
@@ -56,6 +55,9 @@ export function useDragScroll<T extends HTMLElement = HTMLDivElement>() {
 	useEffect(() => {
 		const el = ref.current;
 		if (!el) return;
+		// Touch devices: native overflow scroll only (avoid fighting finger pan).
+		if (window.matchMedia('(pointer: coarse)').matches) return;
+
 		el.style.cursor = 'grab';
 		el.addEventListener('mousedown', onMouseDown);
 		el.addEventListener('mousemove', onMouseMove);
