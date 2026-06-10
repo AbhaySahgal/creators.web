@@ -1,3 +1,7 @@
+import type {
+	AcceptStreamGuidelinesResponse,
+	StreamGuidelinesResponse,
+} from './accountTypes';
 import type { WsClient } from './wsClient';
 import { parseShareMetadata, type ShareMetadata, type ShareTargetType } from './shareTypes';
 
@@ -26,6 +30,24 @@ function assertOptionalChannel(channel?: string): string | undefined {
 	if (channel === undefined) return undefined;
 	const c = channel.trim();
 	return c || undefined;
+}
+
+/** B11: `content /streamguidelines` */
+export function contentWsStreamGuidelines(
+	ws: WsClient,
+	requestIdTag?: string
+): Promise<StreamGuidelinesResponse> {
+	const rid = assertRequestIdTag(requestIdTag);
+	return ws.request('content', 'streamguidelines', [], rid).then(json => json as StreamGuidelinesResponse);
+}
+
+/** B11: `content /acceptstreamguidelines` */
+export function contentWsAcceptStreamGuidelines(
+	ws: WsClient,
+	requestIdTag?: string
+): Promise<AcceptStreamGuidelinesResponse> {
+	const rid = assertRequestIdTag(requestIdTag);
+	return ws.request('content', 'acceptstreamguidelines', [], rid).then(json => json as AcceptStreamGuidelinesResponse);
 }
 
 /** `> content <rid>\n/share <type> <id>` */
