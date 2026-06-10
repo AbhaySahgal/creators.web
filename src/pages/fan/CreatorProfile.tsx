@@ -106,33 +106,45 @@ export function CreatorProfile() {
 
 		setIsLoadingCreator(true);
 
-		void creatorsApi.creators
-			.getById(creatorUserId, ac.signal)
-			.then(h => {
+		const applyHttpProfile = () =>
+			creatorsApi.creators.getById(creatorUserId, ac.signal)
+				.then(h => {
+					if (ac.signal.aborted) return;
+					hasLoadedCreatorRef.current = true;
+					setIsFollowed(Boolean(h.isFollowed));
+					setProfileLikedByMe(Boolean(h.isProfileLiked));
+					const dto = httpCreatorProfileToDto(h);
+					setRemoteCreator(creatorProfileDtoToCreator(dto, cacheCreator ?? undefined));
+				})
+				.catch((httpErr: unknown) => {
+					if (ac.signal.aborted) return;
+					if (!hasLoadedCreatorRef.current && !cacheCreator) {
+						const msg = httpErr instanceof ApiError && httpErr.status === 404 ?
+							'Creator profile not found for this user.' :
+							'Could not load creator profile. Please try again.';
+						showToast(msg, 'error');
+					}
+					if (!hasLoadedCreatorRef.current && cacheCreator) {
+						setRemoteCreator(cacheCreator);
+					}
+					hasLoadedCreatorRef.current = true;
+				});
+
+		void creatorWsGetByUserId(creatorUserId)
+			.then(r => {
 				if (ac.signal.aborted) return;
-				hasLoadedCreatorRef.current = true;
-				setIsFollowed(Boolean(h.isFollowed));
-				setProfileLikedByMe(Boolean(h.isProfileLiked));
-				const dto = httpCreatorProfileToDto(h);
-				setRemoteCreator(creatorProfileDtoToCreator(dto, cacheCreator ?? undefined));
+				if (r.creator) {
+					finishWs(r);
+					return;
+				}
+				return applyHttpProfile();
 			})
 			.catch((err: unknown) => {
 				if (ac.signal.aborted) return;
 				if (!(err instanceof ApiError) || err.status !== 404) {
-					console.error('[creator-profile] HTTP get failed', { creatorUserId, err });
+					console.error('[creator-profile] WS get failed', { creatorUserId, err });
 				}
-				if (contentState.postsWsStatus !== 'ready') {
-					if (!hasLoadedCreatorRef.current && cacheCreator) setRemoteCreator(cacheCreator);
-					else if (!hasLoadedCreatorRef.current) showToast('Could not load creator profile.', 'error');
-					return;
-				}
-				return creatorWsGetByUserId(creatorUserId)
-					.then(finishWs)
-					.catch((e2: unknown) => {
-						if (ac.signal.aborted) return;
-						console.error('[creator-profile] WS fallback failed', e2);
-						if (!hasLoadedCreatorRef.current) showToast('Could not load creator profile.', 'error');
-					});
+				return applyHttpProfile();
 			})
 			.finally(() => {
 				if (!ac.signal.aborted) setIsLoadingCreator(false);

@@ -1,4 +1,85 @@
+import type { Notification } from '../types';
 import type { WsClient } from './wsClient';
+
+export type NotificationFeedFocusState = {
+	focusPostId: string,
+};
+
+export interface CommentHeartedNotificationData {
+	type: 'comment_hearted';
+	post_id: string;
+	comment_id: string;
+	actor_user_id?: string;
+	actor_display_name?: string;
+	actor_avatar_url?: string;
+	deleted_at?: string | null;
+}
+
+export type NotificationNavigationTarget = {
+	path: string,
+	state?: NotificationFeedFocusState,
+};
+
+function coerceId(v: unknown): string {
+	if (typeof v === 'string') return v.trim();
+	if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+	return '';
+}
+
+function coerceOptionalString(v: unknown): string | undefined {
+	if (typeof v !== 'string') return undefined;
+	const t = v.trim();
+	return t || undefined;
+}
+
+export function isCommentHeartedData(data: Record<string, unknown>): boolean {
+	return data.type === 'comment_hearted';
+}
+
+export function parseCommentHeartedData(data: Record<string, unknown>): CommentHeartedNotificationData | null {
+	if (!isCommentHeartedData(data)) return null;
+	const post_id = coerceId(data.post_id);
+	const comment_id = coerceId(data.comment_id);
+	if (!post_id || !comment_id) return null;
+	const deleted_at = data.deleted_at;
+	return {
+		type: 'comment_hearted',
+		post_id,
+		comment_id,
+		actor_user_id: coerceId(data.actor_user_id) || undefined,
+		actor_display_name: coerceOptionalString(data.actor_display_name ?? data.actor_name),
+		actor_avatar_url: coerceOptionalString(data.actor_avatar_url),
+		deleted_at:
+			deleted_at == null || deleted_at === '' ?
+				null :
+				typeof deleted_at === 'string' ?
+					deleted_at :
+					undefined,
+	};
+}
+
+export function isNotificationDeleted(data: Record<string, unknown>): boolean {
+	const v = data.deleted_at;
+	return typeof v === 'string' && v.trim().length > 0;
+}
+
+export function resolveNotificationTarget(n: Notification): NotificationNavigationTarget | null {
+	const data = n.data ?? {};
+	if (isNotificationDeleted(data)) return null;
+
+	const link = coerceOptionalString(data.link);
+	if (link) return { path: link };
+
+	const hearted = parseCommentHeartedData(data);
+	if (hearted) {
+		return {
+			path: '/feed',
+			state: { focusPostId: hearted.post_id },
+		};
+	}
+
+	return null;
+}
 
 export interface InAppNotificationRow {
 	id: string;

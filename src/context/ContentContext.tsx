@@ -13,7 +13,12 @@ import { useEnsureWsAuth, useWs, useWsAuthReady, useWsConnected } from './WsCont
 import { isPostsMockMode } from '../services/postsMode';
 import {
 	buildCreatorListCommand,
+	buildCreatorTopCommand,
 	buildCreatorUpsertCommand,
+	normalizeCreatorListResponse,
+	normalizeCreatorTopResponse,
+	type CreatorListCommandOpts,
+	type CreatorTopCommandOpts,
 	type CreatorUpsertOpts,
 } from '../services/creatorWsService';
 import {
@@ -21,7 +26,7 @@ import {
 	parseUserMeResponse,
 	type UserUpdateProfileOpts,
 } from '../services/userWsService';
-import type { CreatorGetResponse, CreatorListResponse } from '../services/creatorWsTypes';
+import type { CreatorGetResponse, CreatorListResponse, CreatorTopResponse } from '../services/creatorWsTypes';
 import {
 	parseHeartCommentResponse,
 	type CommentDTO,
@@ -482,12 +487,8 @@ interface ContentContextValue {
 	loadCreatorPosts: (creatorUserId: string, reset?: boolean) => Promise<void>;
 	loadPostComments: (postId: string) => Promise<void>;
 	loadMorePostComments: (postId: string) => Promise<void>;
-	creatorWsSearch: (opts: {
-		q?: string,
-		category?: string,
-		limit?: number,
-		beforeCursor?: string,
-	}) => Promise<CreatorListResponse>;
+	creatorWsSearch: (opts: CreatorListCommandOpts) => Promise<CreatorListResponse>;
+	creatorWsTop: (opts?: CreatorTopCommandOpts) => Promise<CreatorTopResponse>;
 	creatorWsGetByPk: (creatorRowId: string) => Promise<CreatorGetResponse>;
 	/** Resolve creator profile by author user id (user_id from posts). */
 	creatorWsGetByUserId: (creatorUserId: string) => Promise<CreatorGetResponse>;
@@ -837,10 +838,19 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 	}, [wsConnected, wsAuthReady, wsRequestLine, mapList, authState.user?.id]);
 
 	const creatorWsSearch = useCallback(
-		(opts: { q?: string, category?: string, limit?: number, beforeCursor?: string }) => {
+		(opts: CreatorListCommandOpts) => {
 			const cmd = buildCreatorListCommand(opts);
 			creatorWsDebug('[creator-ws] -> /list', { cmd, opts });
-			return wsRequestLine('creator', cmd).then(json => json as CreatorListResponse);
+			return wsRequestLine('creator', cmd).then(json => normalizeCreatorListResponse(json));
+		},
+		[wsRequestLine, creatorWsDebug]
+	);
+
+	const creatorWsTop = useCallback(
+		(opts: CreatorTopCommandOpts = {}) => {
+			const cmd = buildCreatorTopCommand(opts);
+			creatorWsDebug('[creator-ws] -> /top', { cmd, opts });
+			return wsRequestLine('creator', cmd).then(json => normalizeCreatorTopResponse(json));
 		},
 		[wsRequestLine, creatorWsDebug]
 	);
@@ -1401,6 +1411,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				loadPostComments,
 				loadMorePostComments,
 				creatorWsSearch,
+				creatorWsTop,
 				creatorWsGetByPk,
 				creatorWsGetByUserId,
 				creatorWsUpsert,
