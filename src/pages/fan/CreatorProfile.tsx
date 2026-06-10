@@ -236,6 +236,12 @@ export function CreatorProfile() {
 	const isOwner =
 		authState.user?.role === 'creator' &&
 		authState.user.id === creatorUserId;
+	const ownerRateMinor =
+		authState.user?.perMinuteRate ??
+		authState.user?.creatorDashboard?.perMinuteRateCents ??
+		null;
+	const ownerPerMinuteRate =
+		ownerRateMinor != null ? Number(ownerRateMinor) / 100 : creator.perMinuteRate;
 	const creatorForDisplay: Creator = isOwner && authState.user ? {
 		...creator,
 		name: authState.user.name.trim() ? authState.user.name : creator.name,
@@ -244,6 +250,7 @@ export function CreatorProfile() {
 		bio: authState.user.bio?.trim() ? authState.user.bio : creator.bio,
 		banner: authState.user.banner?.trim() ? authState.user.banner : creator.banner,
 		category: authState.user.category?.trim() ? authState.user.category : creator.category,
+		perMinuteRate: ownerPerMinuteRate,
 	} : creator;
 
 	const creatorPosts = contentState.posts
