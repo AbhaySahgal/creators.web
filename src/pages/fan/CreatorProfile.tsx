@@ -248,6 +248,12 @@ export function CreatorProfile() {
 	const isOwner =
 		authState.user?.role === 'creator' &&
 		authState.user.id === creatorUserId;
+	const ownerRateMinor =
+		authState.user?.perMinuteRate ??
+		authState.user?.creatorDashboard?.perMinuteRateCents ??
+		null;
+	const ownerPerMinuteRate =
+		ownerRateMinor != null ? Number(ownerRateMinor) / 100 : creator.perMinuteRate;
 	const creatorForDisplay: Creator = isOwner && authState.user ? {
 		...creator,
 		name: authState.user.name.trim() ? authState.user.name : creator.name,
@@ -256,6 +262,7 @@ export function CreatorProfile() {
 		bio: authState.user.bio?.trim() ? authState.user.bio : creator.bio,
 		banner: authState.user.banner?.trim() ? authState.user.banner : creator.banner,
 		category: authState.user.category?.trim() ? authState.user.category : creator.category,
+		perMinuteRate: ownerPerMinuteRate,
 	} : creator;
 
 	const creatorPosts = contentState.posts
@@ -277,15 +284,22 @@ export function CreatorProfile() {
 	function handleStartSession(type: SessionType, durationMinutes: number, _totalCost: number, _payMode: SessionPayMode) {
 		if (!authState.user) return;
 		const kind = type === 'chat' ? 'chat' : 'call';
-		const uiCallType = type === 'audio' ? 'audio' : type === 'video' ? 'video' : undefined;
+		const callModality = type === 'audio' ? 'audio' as const : type === 'video' ? 'video' as const : undefined;
+
 		void requestSession({
 			creatorUserId: creatorForDisplay.id,
 			kind,
 			minutes: durationMinutes,
-			...(kind === 'call' && uiCallType ? { uiCallType } : {}),
+			...(kind === 'call' && callModality ? { callModality } : {}),
 			creatorDisplay: { name: creatorForDisplay.name, avatar: creatorForDisplay.avatar },
 		})
-			.then(() => { showToast('Session request sent. Waiting for creator…'); })
+			.then(() => {
+				const waitLabel =
+					kind === 'call' && callModality === 'audio' ? 'audio call' :
+					kind === 'call' ? 'video call' :
+					'session';
+				showToast(`Session request sent. Waiting for creator (${waitLabel})…`);
+			})
 			.catch(err => {
 				showToast(err instanceof Error ? err.message : 'Failed to request session', 'error');
 			});

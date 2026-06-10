@@ -6,7 +6,7 @@ import React, {
 	useReducer,
 	useRef,
 } from 'react';
-import type { Post, Comment } from '../types';
+import type { Post, Comment, User } from '../types';
 import { isPostLiked, setPostLiked } from '../services/likedPosts';
 import { setPostCommented } from '../services/commentedPosts';
 import { useEnsureWsAuth, useWs, useWsAuthReady, useWsConnected } from './WsContext';
@@ -14,11 +14,18 @@ import { isPostsMockMode } from '../services/postsMode';
 import {
 	buildCreatorListCommand,
 	buildCreatorTopCommand,
+	buildCreatorUpsertCommand,
 	normalizeCreatorListResponse,
 	normalizeCreatorTopResponse,
 	type CreatorListCommandOpts,
 	type CreatorTopCommandOpts,
+	type CreatorUpsertOpts,
 } from '../services/creatorWsService';
+import {
+	buildUserUpdateProfileCommand,
+	parseUserMeResponse,
+	type UserUpdateProfileOpts,
+} from '../services/userWsService';
 import type { CreatorGetResponse, CreatorListResponse, CreatorTopResponse } from '../services/creatorWsTypes';
 import {
 	parseHeartCommentResponse,
@@ -485,7 +492,8 @@ interface ContentContextValue {
 	creatorWsGetByPk: (creatorRowId: string) => Promise<CreatorGetResponse>;
 	/** Resolve creator profile by author user id (user_id from posts). */
 	creatorWsGetByUserId: (creatorUserId: string) => Promise<CreatorGetResponse>;
-	creatorWsUpsert: (username: string, name: string, bio?: string) => Promise<void>;
+	creatorWsUpsert: (username: string, name: string, opts?: CreatorUpsertOpts) => Promise<void>;
+	userWsUpdateProfile: (opts: UserUpdateProfileOpts) => Promise<User>;
 	isPostSaved: (postId: string) => boolean;
 	savePost: (postId: string) => Promise<void>;
 	unsavePost: (postId: string) => Promise<void>;
@@ -863,13 +871,18 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 	);
 
 	const creatorWsUpsert = useCallback(
-		(username: string, name: string, bio?: string) =>
-			wsRequestLine('creator', (() => {
-				const parts: string[] = ['/upsertprofile', username.trim(), name.trim()];
-				const b = bio?.trim();
-				if (b) parts.push(b);
-				return parts.join(' ');
-			})()).then(() => {}),
+		(username: string, name: string, opts?: CreatorUpsertOpts) =>
+			wsRequestLine('creator', buildCreatorUpsertCommand(username, name, opts)).then(() => {}),
+		[wsRequestLine]
+	);
+
+	const userWsUpdateProfile = useCallback(
+		(opts: UserUpdateProfileOpts) =>
+			wsRequestLine('user', buildUserUpdateProfileCommand(opts)).then(json => {
+				const user = parseUserMeResponse(json);
+				if (!user) throw new Error('updateprofile returned no user');
+				return user;
+			}),
 		[wsRequestLine]
 	);
 
@@ -932,8 +945,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 		if (prev?.userId === u.id && prev.username === username) return;
 		creatorBootstrapRef.current = { userId: u.id, username };
 
-		const bio = (u as unknown as { bio?: string }).bio;
-		void creatorWsUpsert(username, name, typeof bio === 'string' && bio.trim() ? bio.trim() : undefined)
+		const bio = u.bio?.trim();
+		void creatorWsUpsert(username, name, {
+			bio: bio || undefined,
+			bannerUrl: u.banner?.trim() || undefined,
+			avatarUrl: u.avatar?.trim() || undefined,
+		})
 			.then(() => creatorWsSearch({}))
 			.then(r => {
 				const patch: Record<string, CreatorDisplay> = {};
@@ -1398,6 +1415,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				creatorWsGetByPk,
 				creatorWsGetByUserId,
 				creatorWsUpsert,
+				userWsUpdateProfile,
 				isPostSaved,
 				savePost,
 				unsavePost,
