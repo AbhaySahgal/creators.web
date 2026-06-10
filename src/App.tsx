@@ -58,8 +58,10 @@ import { LiveStreamRoom } from './pages/live/LiveStreamRoom';
 import { GoLivePage } from './pages/live/GoLivePage';
 import { Contact } from './pages/Contact';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
+import { AccountDeletionPage } from './pages/AccountDeletionPage';
 import { DeleteAccountRequest } from './pages/DeleteAccountRequest';
-import { DeleteAccountRequestSuccess } from './pages/DeleteAccountRequestSuccess.tsx';
+import { DeleteAccountRequestSuccess } from './pages/DeleteAccountRequestSuccess';
+import { DeleteAccountVerifyPage } from './pages/DeleteAccountVerifyPage';
 
 type ErrorBoundaryState = {
 	hasError: boolean,
@@ -235,6 +237,14 @@ function AppRoutes() {
 				<Route path="/admin/reports" element={<ProtectedRoute roles={['admin']}><AdminDashboard /></ProtectedRoute>} />
 
 				<Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+				<Route
+					path="/delete-account"
+					element={<ProtectedRoute roles={['fan', 'creator']}><AccountDeletionPage /></ProtectedRoute>}
+				/>
+				<Route
+					path="/delete-account/verify"
+					element={<ProtectedRoute roles={['fan', 'creator']}><DeleteAccountVerifyPage /></ProtectedRoute>}
+				/>
 				<Route
 					path="/delete-account-request"
 					element={<ProtectedRoute roles={['fan', 'creator']}><DeleteAccountRequest /></ProtectedRoute>}

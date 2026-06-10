@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Lock, Trash2, Image, Type, MessageCircle, Sparkles, Radio, X } from '../../components/icons';
+import { PostInsightsPanel } from '../../components/creator/PostInsightsPanel';
+import { ContentStreamCard } from '../../components/creator/ContentStreamCard';
+import { ContentStreamLoadMoreTile } from '../../components/creator/ContentStreamLoadMoreTile';
+import { HorizontalScrollStrip } from '../../components/ui/HorizontalScrollStrip';
+import { CONTENT_STREAMS_PAGE_SIZE, useContentStreams } from '../../hooks/useContentStreams';
 import { Layout } from '../../components/layout/Layout';
 import { Modal } from '../../components/ui/Toast';
 import { Button } from '../../components/ui/Button';
@@ -34,6 +39,15 @@ export function ContentManager() {
 	const { state: authState } = useAuth();
 	const { endLive } = useLiveStream();
 	const myActiveLive = useMyActiveLive();
+	const {
+		streams: pastStreams,
+		loading: streamsLoading,
+		loadingMore: streamsLoadingMore,
+		error: streamsError,
+		load: reloadStreams,
+		loadMore: loadMoreStreams,
+		hasMore: hasMoreStreams,
+	} = useContentStreams(contentState.postsWsStatus === 'ready');
 	const [showNewPost, setShowNewPost] = useState(false);
 	const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 	const [endingLive, setEndingLive] = useState(false);
@@ -46,6 +60,7 @@ export function ContentManager() {
 	const [remoteMediaFile, setRemoteMediaFile] = useState<File | null>(null);
 	const [isPosting, setIsPosting] = useState(false);
 	const [uploadError, setUploadError] = useState<string>('');
+	const [visibleStreamCount, setVisibleStreamCount] = useState(CONTENT_STREAMS_PAGE_SIZE);
 
 	const authedCreatorUserId = authState.user?.id ?? '';
 	const creatorData = creator ?? (authState.user?.role === 'creator' ? {
@@ -61,6 +76,23 @@ export function ContentManager() {
 	);
 	const totalLikes = useMemo(() => myPosts.reduce((s, p) => s + (p.likes ?? 0), 0), [myPosts]);
 	const totalComments = useMemo(() => myPosts.reduce((s, p) => s + Math.max(p.commentCount ?? 0, p.comments?.length ?? 0), 0), [myPosts]);
+	const visiblePastStreams = useMemo(
+		() => pastStreams.slice(0, visibleStreamCount),
+		[pastStreams, visibleStreamCount]
+	);
+	const canLoadMoreStreams =
+		visibleStreamCount < pastStreams.length || hasMoreStreams;
+
+	function handleLoadMoreStreams() {
+		if (visibleStreamCount < pastStreams.length) {
+			setVisibleStreamCount(c => c + CONTENT_STREAMS_PAGE_SIZE);
+			return;
+		}
+		if (!hasMoreStreams || streamsLoadingMore) return;
+		void loadMoreStreams().then(() => {
+			setVisibleStreamCount(c => c + CONTENT_STREAMS_PAGE_SIZE);
+		});
+	}
 
 	useEffect(() => {
 		// Wait until the WebSocket is ready before fetching — calling loadCreatorPosts
@@ -88,6 +120,7 @@ export function ContentManager() {
 			) :
 			Promise.resolve(null);
 
+		const hadMedia = !!remoteMediaFile;
 		void uploadStep
 			.then(assetId => {
 				const assetIds = assetId ? [assetId] : [];
@@ -98,10 +131,14 @@ export function ContentManager() {
 					text,
 					assetIds: assetIds.length ? assetIds : undefined,
 					ppvUsdCents,
-				});
+				}).then(() => hadMedia);
 			})
-			.then(() => {
-				showToast('Post published!');
+			.then(hadAssets => {
+				showToast(
+					hadAssets ?
+						'Post created — your media will appear shortly' :
+						'Post published!'
+				);
 				setShowNewPost(false);
 				setNewPostText('');
 				setRemoteMediaFile(null);
@@ -163,7 +200,7 @@ export function ContentManager() {
 
 	return (
 		<Layout>
-			<div className="max-w-4xl mx-auto px-4 py-6">
+			<div className="max-w-4xl mx-auto px-4 py-6 w-full min-w-0">
 				<div className="flex items-center justify-between mb-6">
 					<div>
 						<h1 className="text-xl font-bold text-foreground">Content Manager</h1>
@@ -235,67 +272,141 @@ export function ContentManager() {
 					</div>
 				)}
 
-				<div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-					<div className="bg-surface border border-border/20 rounded-2xl p-4">
-						<p className="text-xs text-muted mb-1">Total likes</p>
-						<p className="text-lg font-bold text-foreground">{totalLikes.toLocaleString()}</p>
+				<section className="mb-6">
+					<div className="mb-3">
+						<h2 className="text-base font-bold text-foreground">Past streams</h2>
+						<p className="text-muted text-sm">
+							{streamsLoading && pastStreams.length === 0 ?
+								'Loading…' :
+								`${pastStreams.length} ended stream${pastStreams.length === 1 ? '' : 's'}`}
+						</p>
 					</div>
-					<div className="bg-surface border border-border/20 rounded-2xl p-4">
-						<p className="text-xs text-muted mb-1">Total comments</p>
-						<p className="text-lg font-bold text-foreground">{totalComments.toLocaleString()}</p>
-					</div>
-					<div className="bg-surface border border-border/20 rounded-2xl p-4">
-						<p className="text-xs text-muted mb-1">Tips & earnings</p>
-						<p className="text-sm text-muted">See breakdown in Earnings.</p>
-					</div>
-				</div>
 
-				{myPosts.length === 0 ? (
-					<div className="text-center py-16 bg-surface border border-border/20 rounded-2xl">
-						<Sparkles className="w-10 h-10 text-muted/50 mx-auto mb-3" />
-						<p className="text-muted mb-1">No posts yet</p>
-						<p className="text-xs text-muted/80 mb-4">Create your first post and start engaging with fans.</p>
-						<Button variant="primary" onClick={() => setShowNewPost(true)} leftIcon={<Plus className="w-4 h-4" />}>
-							Create Post
-						</Button>
+					{streamsError && (
+						<div className="mb-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-between gap-3">
+							<p className="text-xs text-rose-200">{streamsError}</p>
+							<button
+								type="button"
+								onClick={() => { void reloadStreams(); }}
+								className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 shrink-0"
+							>
+								Retry
+							</button>
+						</div>
+					)}
+
+					{streamsLoading && pastStreams.length === 0 && (
+						<HorizontalScrollStrip>
+							{Array.from({ length: CONTENT_STREAMS_PAGE_SIZE }, (_, i) => (
+								<div
+									key={i}
+									className="w-[272px] shrink-0 snap-start h-[200px] rounded-2xl bg-foreground/5 animate-pulse border border-border/10"
+								/>
+							))}
+						</HorizontalScrollStrip>
+					)}
+
+					{!streamsLoading && pastStreams.length === 0 && !streamsError && (
+						<div className="text-center py-10 bg-surface border border-border/20 rounded-2xl">
+							<Radio className="w-8 h-8 text-muted/40 mx-auto mb-2" />
+							<p className="text-sm text-muted">No ended streams yet</p>
+							<p className="text-xs text-muted/70 mt-1">Finished lives appear here for your catalog.</p>
+						</div>
+					)}
+
+					{visiblePastStreams.length > 0 && (
+						<HorizontalScrollStrip>
+							{visiblePastStreams.map(s => (
+								<ContentStreamCard key={s.id} stream={s} layout="carousel" />
+							))}
+							{canLoadMoreStreams && (
+								<ContentStreamLoadMoreTile
+									onClick={handleLoadMoreStreams}
+									loading={streamsLoadingMore}
+									disabled={streamsLoadingMore}
+								/>
+							)}
+						</HorizontalScrollStrip>
+					)}
+				</section>
+
+				<section className="mb-6">
+					<div className="mb-3">
+						<h2 className="text-base font-bold text-foreground">Posts</h2>
+						<p className="text-muted text-sm">
+							{myPosts.length} post{myPosts.length === 1 ? '' : 's'}
+						</p>
 					</div>
-				) : (
-					<div className="space-y-4">
-						{myPosts.map(post => (
-							<div key={post.id} className="space-y-2">
-								<div className="flex items-center justify-between">
-									<div className="flex items-center gap-2 flex-wrap">
-										{post.isLocked && !post.isPPV && (
-											<span className="text-[10px] bg-rose-500/15 text-rose-400 px-2 py-0.5 rounded-full flex items-center gap-1">
-												<Lock className="w-3 h-3" /> Subscribers
+
+					<div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+						<div className="bg-surface border border-border/20 rounded-2xl p-4">
+							<p className="text-xs text-muted mb-1">Total likes</p>
+							<p className="text-lg font-bold text-foreground">{totalLikes.toLocaleString()}</p>
+						</div>
+						<div className="bg-surface border border-border/20 rounded-2xl p-4">
+							<p className="text-xs text-muted mb-1">Total comments</p>
+							<p className="text-lg font-bold text-foreground">{totalComments.toLocaleString()}</p>
+						</div>
+						<div className="bg-surface border border-border/20 rounded-2xl p-4">
+							<p className="text-xs text-muted mb-1">Tips & earnings</p>
+							<p className="text-sm text-muted">See breakdown in Earnings.</p>
+						</div>
+					</div>
+
+					{myPosts.length === 0 ? (
+						<div className="text-center py-16 bg-surface border border-border/20 rounded-2xl">
+							<Sparkles className="w-10 h-10 text-muted/50 mx-auto mb-3" />
+							<p className="text-muted mb-1">No posts yet</p>
+							<p className="text-xs text-muted/80 mb-4">Create your first post and start engaging with fans.</p>
+							<Button variant="primary" onClick={() => setShowNewPost(true)} leftIcon={<Plus className="w-4 h-4" />}>
+								Create Post
+							</Button>
+						</div>
+					) : (
+						<div className="space-y-4">
+							{myPosts.map(post => (
+								<div key={post.id} className="space-y-2">
+									<div className="flex items-center justify-between">
+										<div className="flex items-center gap-2 flex-wrap">
+											{post.isLocked && !post.isPPV && (
+												<span className="text-[10px] bg-rose-500/15 text-rose-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+													<Lock className="w-3 h-3" /> Subscribers
+												</span>
+											)}
+											{post.isPPV && (
+												<span className="text-[10px] bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full">
+													PPV {formatINR(post.ppvPrice ?? 0)}
+												</span>
+											)}
+											<span className="text-[10px] bg-foreground/10 text-muted px-2 py-0.5 rounded-full flex items-center gap-1">
+												<MessageCircle className="w-3 h-3" />
+												{Math.max(post.commentCount ?? 0, post.comments?.length ?? 0)} comments
 											</span>
-										)}
-										{post.isPPV && (
-											<span className="text-[10px] bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full">
-												PPV {formatINR(post.ppvPrice ?? 0)}
-											</span>
-										)}
-										<span className="text-[10px] bg-foreground/10 text-muted px-2 py-0.5 rounded-full flex items-center gap-1">
-											<MessageCircle className="w-3 h-3" />
-											{Math.max(post.commentCount ?? 0, post.comments?.length ?? 0)} comments
-										</span>
+											{post.mediaPending && (
+												<span className="text-[10px] bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full inline-flex items-center gap-1.5">
+													<span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-hidden />
+													<span>Processing media…</span>
+												</span>
+											)}
+										</div>
+										<div className="flex gap-1">
+											<button
+												onClick={() => setDeleteConfirm(post.id)}
+												className="p-1.5 rounded-lg text-muted hover:text-rose-500 hover:bg-rose-400/10 transition-colors"
+												title="Delete"
+											>
+												<Trash2 className="w-3.5 h-3.5" />
+											</button>
+										</div>
 									</div>
-									<div className="flex gap-1">
-										<button
-											onClick={() => setDeleteConfirm(post.id)}
-											className="p-1.5 rounded-lg text-muted hover:text-rose-500 hover:bg-rose-400/10 transition-colors"
-											title="Delete"
-										>
-											<Trash2 className="w-3.5 h-3.5" />
-										</button>
-									</div>
+
+									<PostCard post={post} showCreatorLink={false} />
+									<PostInsightsPanel postId={post.id} />
 								</div>
-
-								<PostCard post={post} showCreatorLink={false} />
-							</div>
-						))}
-					</div>
-				)}
+							))}
+						</div>
+					)}
+				</section>
 			</div>
 
 			<Modal isOpen={showNewPost} onClose={() => setShowNewPost(false)} title="Create New Post" maxWidth="max-w-lg">

@@ -63,7 +63,8 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  [class*="overflow-x-auto"] {
+  [class*="overflow-x-auto"],
+  [class*="overflow-x-scroll"] {
     touch-action: pan-x pinch-zoom;
   }
 
@@ -105,6 +106,21 @@
     scrollbar-width: none;
   }
   .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /** Horizontal strip: native touch/trackpad scroll, hidden scrollbar */
+  .touch-scroll-x {
+    overflow-x: scroll;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+    touch-action: pan-x pinch-zoom;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .touch-scroll-x::-webkit-scrollbar {
     display: none;
   }
 }

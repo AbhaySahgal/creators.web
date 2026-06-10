@@ -3,7 +3,7 @@ export type PostVisibility = 'public' | 'subscribers' | 'ppv';
 export interface PostMediaDTO {
 	type: 'image' | 'video';
 	url: string;
-	thumbnail_url?: string;
+	thumbnail_url?: string | null;
 	[key: string]: unknown;
 }
 
@@ -222,4 +222,42 @@ export interface DeletedPostEventPayload {
 export interface LikeUpdateEventPayload {
 	post_id: string;
 	like_count: number;
+}
+
+/** `posts /insights <postId>` — author-only analytics (C7). */
+export interface PostInsightsTimeSeriesPoint {
+	date?: string;
+	value?: number;
+	count?: number;
+	[key: string]: unknown;
+}
+
+export interface PostInsightsResponse {
+	like_count: number;
+	comment_count: number;
+	tip_count: number;
+	tips_cents: string;
+	ppv_unlock_count: number;
+	time_series: PostInsightsTimeSeriesPoint[];
+}
+
+/** `creator /contentstreams` + GET /me/content/streams (C8). */
+export type ContentStreamVisibility = 'everyone' | 'followers' | 'subscribers';
+
+export interface ContentStreamItem {
+	id: string;
+	title: string;
+	status: 'live' | 'ended';
+	visibility: ContentStreamVisibility;
+	banner_url: string | null;
+	viewer_count: number;
+	like_count: number;
+	tip_total_minor: string;
+	started_at: string;
+	ended_at: string | null;
+}
+
+export interface ContentStreamsResponse {
+	streams: ContentStreamItem[];
+	nextCursor: string | null;
 }

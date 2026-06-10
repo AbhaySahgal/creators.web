@@ -45,16 +45,12 @@ import {
 	postDtoToPost,
 } from '../services/postDtoMap';
 import { useAuth } from './AuthContext';
+import { postsCreate, type CreatePostInput } from '../services/postsWsService';
 import { unlockPpvPostFromWallet, fetchPost, shareErrorMessage } from '../services/ppvService';
 
 export type PostsWsStatus = 'idle' | 'connecting' | 'ready' | 'error';
 
-export interface CreatePostInput {
-	visibility: 'public' | 'subscribers' | 'ppv';
-	text: string;
-	assetIds?: string[];
-	ppvUsdCents?: number;
-}
+export type { CreatePostInput };
 
 interface ContentState {
 	posts: Post[];
@@ -1230,43 +1226,21 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 		dispatch({ type: 'ADD_POST', payload: post });
 	}, []);
 
-	const buildCreateCommand = (input: CreatePostInput): string => {
-		const parts: string[] = ['/create', input.visibility];
-		if (input.visibility === 'ppv' && input.ppvUsdCents != null) {
-			parts.push(String(input.ppvUsdCents));
-		}
-		if (input.assetIds?.length) {
-			parts.push(`assets=${input.assetIds.join(',')}`);
-		}
-		let t = input.text.trim();
-		// Backend spec: for public/subscribers, a bare integer as the 2nd token is reserved for PPV price.
-		// If the post text starts with digits and there are no assets, inject a zero-width space so the
-		// first text token is not a bare integer, while rendering the same to users.
-		if (
-			t &&
-			input.visibility !== 'ppv' &&
-			!input.assetIds?.length &&
-			/^\d/.test(t)
-		) {
-			t = `\u200B${t}`;
-		}
-		if (t) parts.push(t);
-		return parts.join(' ');
-	};
-
 	const createPost = useCallback(
 		(input: CreatePostInput) => {
-			return wsRequestLine('posts', buildCreateCommand(input)).then(json => {
-				const dto = (json as { post: PostDTO }).post;
-				const id = String(dto.user_id);
-				return fetchProfilesForIds([id]).then(profiles => {
-					const prof = resolveCreatorDisplay(id, profiles);
-					const post = postDtoToPost(dto, prof, false, authUserRef.current?.id);
-					dispatch({ type: 'UPSERT_POST', payload: post });
+			return ensureWsAuth()
+				.then(() => postsCreate(ws, input))
+				.then(json => {
+					const dto = json.post;
+					const id = String(dto.user_id);
+					return fetchProfilesForIds([id]).then(profiles => {
+						const prof = resolveCreatorDisplay(id, profiles);
+						const post = postDtoToPost(dto, prof, false, authUserRef.current?.id);
+						dispatch({ type: 'UPSERT_POST', payload: post });
+					});
 				});
-			});
 		},
-		[fetchProfilesForIds, resolveCreatorDisplay, wsRequestLine]
+		[ensureWsAuth, fetchProfilesForIds, resolveCreatorDisplay, ws]
 	);
 
 	const editPost = useCallback((postId: string, text: string) => {

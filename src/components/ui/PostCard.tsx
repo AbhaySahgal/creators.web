@@ -18,6 +18,7 @@ import { Modal } from './Toast';
 import { isPostCommented } from '../../services/commentedPosts';
 import { RichTextarea } from './RichTextarea';
 import { tokenizeHashtags } from '../../utils/hashtag';
+import { MediaProcessingPlaceholder } from '../creator/MediaProcessingPlaceholder';
 
 interface PostCardProps {
 	post: Post;
@@ -266,7 +267,11 @@ export function PostCard({
 				</p>
 			)}
 
-			{post.type !== 'text' && (post.mediaUrl || post.thumbnailUrl) && (
+			{isOwner && post.mediaPending && (
+				<MediaProcessingPlaceholder kind={post.type === 'video' ? 'video' : 'image'} />
+			)}
+
+			{post.type !== 'text' && (post.mediaUrl || post.thumbnailUrl) && !post.mediaPending && (
 				<div className="relative">
 					<img
 						src={isContentVisible ? (post.mediaUrl ?? post.thumbnailUrl) : (post.thumbnailUrl ?? post.mediaUrl)}

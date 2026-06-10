@@ -7,6 +7,13 @@ export interface CreatorDisplay {
 	username: string;
 }
 
+/** Media row exists but URL empty until transcode/scan completes. */
+export function isPostMediaPending(dto: PostDTO): boolean {
+	const m = dto.media?.[0];
+	if (!m?.type) return false;
+	return !(m.url ?? '').trim();
+}
+
 function isUnlockedForViewer(dto: PostDTO, currentUserId: string | undefined): boolean {
 	if (dto.is_unlocked_for_viewer === true) return true;
 	if (currentUserId && String(dto.user_id) === currentUserId) return true;
@@ -53,7 +60,7 @@ export function postDtoToPost(
 		isPPVWithPrice ? Number(unlockPriceMinor) / 100 :
 		isPPV && dto.ppv_price_usd_cents != null ? dto.ppv_price_usd_cents / 100 :
 		undefined;
-
+	const mediaPending = isPostMediaPending(dto);
 	const name = creator?.name ?? 'Creator';
 	const avatar = creator?.avatar ?? '';
 	const username = creator?.username ?? 'creator';
@@ -86,6 +93,7 @@ export function postDtoToPost(
 		createdAt: dto.created_at,
 		isPinned: partial?.isPinned ?? false,
 		unlockedBy,
+		mediaPending,
 	};
 }
 
