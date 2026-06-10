@@ -22,6 +22,14 @@ import {
 	normalizeCreatorTopResponse,
 } from './creatorWsService';
 import type { CreatorListResponse, CreatorTopResponse } from './creatorWsTypes';
+import {
+	normalizePayoutBalance,
+	normalizePayoutHistory,
+	normalizePayoutWithdraw,
+	type PayoutBalance,
+	type PayoutHistory,
+	type PayoutWithdrawResult,
+} from './payoutTypes';
 import { ZERO_MINOR } from '../utils/money';
 import { getSessionToken, setSessionToken } from './sessionToken';
 import type { ListConversationsResponse } from './chatWsTypes';
@@ -638,6 +646,25 @@ export const creatorsApi = {
 				return requestJson<UpdateNotificationSettingsResponse>('/me/notification-settings', { method: 'PUT', body, auth: true });
 			},
 		},
+		payouts: {
+			balance(signal?: AbortSignal): Promise<PayoutBalance> {
+				return requestJson<unknown>('/me/payouts/balance', { method: 'GET', auth: true, signal })
+					.then(normalizePayoutBalance);
+			},
+			withdraw(body: { amountCents: string }): Promise<PayoutWithdrawResult> {
+				return requestJson<unknown>('/me/payouts/withdraw', { method: 'POST', body, auth: true })
+					.then(normalizePayoutWithdraw);
+			},
+			history(params?: { limit?: number, before?: string }, signal?: AbortSignal): Promise<PayoutHistory> {
+				const q = new URLSearchParams();
+				if (params?.limit != null) q.set('limit', String(params.limit));
+				if (params?.before?.trim()) q.set('before', params.before.trim());
+				const qs = q.toString();
+				const path = qs ? `/me/payouts/history?${qs}` : '/me/payouts/history';
+				return requestJson<unknown>(path, { method: 'GET', auth: true, signal })
+					.then(normalizePayoutHistory);
+			},
+		},
 		/** B9: POST /me/delete-request */
 		deleteRequest(): Promise<DeleteRequestResponse> {
 			return requestJson<DeleteRequestResponse>('/me/delete-request', { method: 'POST', auth: true });
@@ -686,12 +713,6 @@ export const creatorsApi = {
 					{ method: 'POST', auth: true, signal }
 				);
 			},
-		},
-	},
-	content: {
-		/** B11: GET /content/stream-guidelines */
-		streamGuidelines(signal?: AbortSignal): Promise<StreamGuidelinesResponse> {
-			return requestJson<StreamGuidelinesResponse>('/content/stream-guidelines', { method: 'GET', signal });
 		},
 	},
 	payments: {
@@ -794,6 +815,10 @@ export const creatorsApi = {
 		},
 	},
 	content: {
+		/** B11: GET /content/stream-guidelines */
+		streamGuidelines(signal?: AbortSignal): Promise<StreamGuidelinesResponse> {
+			return requestJson<StreamGuidelinesResponse>('/content/stream-guidelines', { method: 'GET', signal });
+		},
 		streams(opts?: { limit?: number, before?: string }, signal?: AbortSignal): Promise<ContentStreamsResponse> {
 			const params = new URLSearchParams();
 			if (opts?.limit != null) params.set('limit', String(opts.limit));

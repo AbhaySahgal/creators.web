@@ -1,15 +1,18 @@
 import { useState } from 'react';
-import { DollarSign, TrendingUp, Zap, Users, ArrowUpRight, CheckCircle } from '../../components/icons';
+import { DollarSign, TrendingUp, Zap, Users, ArrowUpRight } from '../../components/icons';
 import { Layout } from '../../components/layout/Layout';
-import { Modal } from '../../components/ui/Toast';
 import { Button } from '../../components/ui/Button';
+import { PayoutBalanceCards } from '../../components/creator/PayoutBalanceCards';
+import { PayoutHistoryList } from '../../components/creator/PayoutHistoryList';
+import { PayoutKycBanner } from '../../components/creator/PayoutKycBanner';
+import { WithdrawPayoutModal } from '../../components/creator/WithdrawPayoutModal';
 import { useAuth, useCurrentCreator } from '../../context/AuthContext';
+import { usePayouts } from '../../hooks/usePayouts';
 import { mockCreators } from '../../data/users';
 import { useNotifications } from '../../context/NotificationContext';
-import { delayMs } from '../../utils/delay';
-import { formatINRFromMinor, parseMinor } from '../../utils/money';
 import { formatINR } from '../../services/razorpay';
 import { earningsPageMonthlyRupeeRows, parseMinorStringToRupees } from '../../utils/creatorDashboardMonthlyStats';
+import { compareMinor } from '../../utils/money';
 
 function parseMinorToRupees(minor: string | number | null | undefined): number {
 	return parseMinorStringToRupees(minor);
@@ -20,14 +23,28 @@ export function Earnings() {
 	const { state: authState } = useAuth();
 	const { showToast } = useNotifications();
 	const [showWithdraw, setShowWithdraw] = useState(false);
-	const [withdrawAmount, setWithdrawAmount] = useState('');
-	const [isWithdrawing, setIsWithdrawing] = useState(false);
-	const [withdrawSuccess, setWithdrawSuccess] = useState(false);
-	const [bankName, setBankName] = useState('');
-	const [accountNumber, setAccountNumber] = useState('');
 
 	const creatorData = creator ?? mockCreators[0];
 	const dashboard = authState.user?.creatorDashboard;
+	const fallbackKyc = dashboard?.kycStatus ?? creatorData.kycStatus;
+
+	const {
+		balance,
+		balanceLoading,
+		balanceError,
+		reloadBalance,
+		withdrawals,
+		historyLoading,
+		historyLoadingMore,
+		historyError,
+		hasMoreHistory,
+		loadMoreHistory,
+		reloadHistory,
+		withdrawing,
+		requestWithdraw,
+		canWithdraw,
+		kycStatus,
+	} = usePayouts(fallbackKyc);
 
 	const totalEarnings = dashboard ? parseMinorToRupees(dashboard.totalEarningsCents) : creatorData.totalEarnings;
 	const monthlyEarnings = dashboard ? parseMinorToRupees(dashboard.monthlyEarningsCents) : creatorData.monthlyEarnings;
@@ -41,31 +58,55 @@ export function Earnings() {
 	const sourceSessions = bySource ? parseMinorToRupees(bySource.sessionsCents) : 0;
 	const revenueSourcesTotal = sourceSubscriptions + sourceTips + sourceSessions;
 
-	function handleWithdraw() {
-		if (!withdrawAmount || !bankName || !accountNumber) {
-			showToast('Please fill in all fields', 'error'); return;
-		}
-		setIsWithdrawing(true);
-		void delayMs(1200).then(() => {
-			setWithdrawSuccess(true);
-			setIsWithdrawing(false);
-			showToast(`Withdrawal of ${formatINR(Number(withdrawAmount) || 0)} initiated!`);
-			setTimeout(() => {
-				setWithdrawSuccess(false);
-				setShowWithdraw(false);
-			}, 2000);
+	const availableMinor = balance?.availableCents ?? '0';
+	const withdrawDisabled =
+		!canWithdraw ||
+		balanceLoading ||
+		compareMinor(availableMinor, '<=', '0');
+
+	function handleWithdraw(amountCents: string) {
+		return requestWithdraw(amountCents).then(result => {
+			showToast('Withdrawal requested — processing', 'success');
+			return result;
 		});
 	}
 
 	return (
 		<Layout>
 			<div className="max-w-4xl mx-auto px-4 py-6">
-				<div className="flex items-center justify-between mb-6">
-					<h1 className="text-xl font-bold text-foreground">Earnings</h1>
-					<Button variant="primary" onClick={() => setShowWithdraw(true)} leftIcon={<ArrowUpRight className="w-4 h-4" />} size="sm">
+				<div className="flex items-center justify-between mb-2">
+					<div>
+						<h1 className="text-xl font-bold text-foreground">Earnings</h1>
+						<p className="text-sm text-muted">Analytics and payouts</p>
+					</div>
+					<Button
+						variant="primary"
+						onClick={() => setShowWithdraw(true)}
+						leftIcon={<ArrowUpRight className="w-4 h-4" />}
+						size="sm"
+						disabled={withdrawDisabled}
+					>
 						Withdraw
 					</Button>
 				</div>
+
+				<section className="mb-6">
+					<h2 className="text-base font-bold text-foreground mb-3">Payouts</h2>
+					{balanceError && (
+						<div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3">
+							<p className="text-xs text-rose-200">{balanceError}</p>
+							<button
+								type="button"
+								onClick={() => { void reloadBalance(); }}
+								className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-100"
+							>
+								Retry
+							</button>
+						</div>
+					)}
+					<PayoutKycBanner kycStatus={kycStatus} />
+					<PayoutBalanceCards balance={balance} loading={balanceLoading} />
+				</section>
 
 				<div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
 					{[
@@ -110,7 +151,7 @@ export function Earnings() {
 					</div>
 				</div>
 
-				<div className="bg-surface border border-border/20 rounded-2xl p-5">
+				<div className="bg-surface border border-border/20 rounded-2xl p-5 mb-4">
 					<h3 className="font-semibold text-foreground mb-4">Revenue Sources</h3>
 					<div className="space-y-3">
 						{[
@@ -134,61 +175,26 @@ export function Earnings() {
 						})}
 					</div>
 				</div>
+
+				<PayoutHistoryList
+					withdrawals={withdrawals}
+					loading={historyLoading}
+					loadingMore={historyLoadingMore}
+					error={historyError}
+					hasMore={hasMoreHistory}
+					onRetry={() => { void reloadHistory(); }}
+					onLoadMore={() => { void loadMoreHistory(); }}
+				/>
 			</div>
 
-			<Modal isOpen={showWithdraw} onClose={() => { setShowWithdraw(false); setWithdrawSuccess(false); }} title="Withdraw Earnings">
-				<div className="p-5">
-					{withdrawSuccess ? (
-						<div className="text-center py-8">
-							<div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
-								<CheckCircle className="w-8 h-8 text-emerald-400" />
-							</div>
-							<p className="text-foreground font-semibold text-lg">Withdrawal Initiated!</p>
-							<p className="text-muted text-sm mt-1">Funds will arrive in 2-3 business days</p>
-						</div>
-					) : (
-						<div className="space-y-4">
-							<div className="bg-foreground/5 rounded-xl p-3 flex justify-between">
-								<span className="text-sm text-muted">Available Balance</span>
-								<span className="text-sm font-bold text-emerald-400">{formatINRFromMinor(creatorData.walletBalanceMinor)}</span>
-							</div>
-							<div>
-								<label className="block text-sm text-muted mb-1.5">Amount to Withdraw</label>
-								<input
-									type="number"
-									value={withdrawAmount}
-									onChange={e => setWithdrawAmount(e.target.value)}
-									placeholder="0.00"
-									max={Number(parseMinor(creatorData.walletBalanceMinor)) / 100}
-									className="w-full bg-input border border-border/20 rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring/40"
-								/>
-							</div>
-							<div>
-								<label className="block text-sm text-muted mb-1.5">Bank Name</label>
-								<input
-									value={bankName}
-									onChange={e => setBankName(e.target.value)}
-									placeholder="e.g. Chase Bank"
-									className="w-full bg-input border border-border/20 rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring/40"
-								/>
-							</div>
-							<div>
-								<label className="block text-sm text-muted mb-1.5">Account Number (last 4)</label>
-								<input
-									value={accountNumber}
-									onChange={e => setAccountNumber(e.target.value)}
-									placeholder="****1234"
-									maxLength={8}
-									className="w-full bg-input border border-border/20 rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring/40"
-								/>
-							</div>
-							<Button variant="primary" fullWidth isLoading={isWithdrawing} onClick={() => { void handleWithdraw(); }}>
-								Withdraw {formatINR(Number(withdrawAmount) || 0)}
-							</Button>
-						</div>
-					)}
-				</div>
-			</Modal>
+			<WithdrawPayoutModal
+				isOpen={showWithdraw}
+				onClose={() => setShowWithdraw(false)}
+				balance={balance}
+				withdrawing={withdrawing}
+				canWithdraw={canWithdraw}
+				onWithdraw={handleWithdraw}
+			/>
 		</Layout>
 	);
 }
