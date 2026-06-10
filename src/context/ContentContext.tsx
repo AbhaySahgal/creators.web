@@ -6,25 +6,32 @@ import React, {
 	useReducer,
 	useRef,
 } from 'react';
-import type { Post, Comment } from '../types';
+import type { Post, Comment, User } from '../types';
 import { isPostLiked, setPostLiked } from '../services/likedPosts';
 import { setPostCommented } from '../services/commentedPosts';
 import { useEnsureWsAuth, useWs, useWsAuthReady, useWsConnected } from './WsContext';
 import { isPostsMockMode } from '../services/postsMode';
 import {
 	buildCreatorListCommand,
+	buildCreatorUpsertCommand,
+	type CreatorUpsertOpts,
 } from '../services/creatorWsService';
+import {
+	buildUserUpdateProfileCommand,
+	parseUserMeResponse,
+	type UserUpdateProfileOpts,
+} from '../services/userWsService';
 import type { CreatorGetResponse, CreatorListResponse } from '../services/creatorWsTypes';
 import {
 	parseHeartCommentResponse,
 	type CommentDTO,
+	type CommentDeletedEventPayload,
 	type CommentHeartUpdatePayload,
 	type DeletedPostEventPayload,
 	type LikeUpdateEventPayload,
 	type ListCommentsResponse,
 	type ListPostsResponse,
 	type PostDTO,
-	type ReportPostResponse,
 } from '../services/postsTypes';
 import {
 	type CreatorDisplay,
@@ -66,6 +73,7 @@ type ContentAction =
 	{ type: 'PATCH_POST_LIKES', payload: { postId: string, like_count: number } } |
 	{ type: 'ADD_COMMENT', payload: { postId: string, comment: Comment } } |
 	{ type: 'PATCH_COMMENT_HEART', payload: { postId: string, commentId: string, heart_count: number } } |
+	{ type: 'REMOVE_COMMENT_SUBTREE', payload: { postId: string, rootCommentId: string, deletedCount?: number } } |
 	{ type: 'UNLOCK_POST', payload: { postId: string, userId: string } } |
 	{ type: 'ADD_POST', payload: Post } |
 	{ type: 'UPSERT_POST', payload: Post } |
@@ -141,6 +149,22 @@ function wsEscapeMultilineText(text: string): string {
 	return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '\\n');
 }
 
+function collectCommentSubtreeIds(comments: readonly Comment[], rootId: string): Record<string, true> {
+	const ids: Record<string, true> = { [rootId]: true };
+	for (;;) {
+		let added = false;
+		for (const c of comments) {
+			const p = c.parentCommentId ?? null;
+			if (p != null && ids[p] && !ids[c.id]) {
+				ids[c.id] = true;
+				added = true;
+			}
+		}
+		if (!added) break;
+	}
+	return ids;
+}
+
 function contentReducer(state: ContentState, action: ContentAction): ContentState {
 	switch (action.type) {
 		case 'TOGGLE_LIKE': {
@@ -207,6 +231,23 @@ function contentReducer(state: ContentState, action: ContentAction): ContentStat
 						comments: p.comments.map(c =>
 							c.id === commentId ? { ...c, heartCount: heart_count } : c
 						),
+					};
+				}),
+			};
+		}
+		case 'REMOVE_COMMENT_SUBTREE': {
+			const { postId, rootCommentId, deletedCount } = action.payload;
+			return {
+				...state,
+				posts: state.posts.map(p => {
+					if (p.id !== postId) return p;
+					const ids = collectCommentSubtreeIds(p.comments, rootCommentId);
+					const removed = Object.keys(ids).length;
+					const dec = deletedCount ?? removed;
+					return {
+						...p,
+						comments: p.comments.filter(c => !ids[c.id]),
+						commentCount: Math.max(0, p.commentCount - dec),
 					};
 				}),
 			};
@@ -417,6 +458,7 @@ interface ContentContextValue {
 	addComment: (postId: string, text: string) => Promise<void>;
 	addReply: (postId: string, parentCommentId: string, text: string) => Promise<void>;
 	heartComment: (commentId: string) => Promise<void>;
+	deleteCommentAsAuthor: (postId: string, commentId: string) => Promise<void>;
 	unlockPost: (postId: string, userId: string) => void;
 	/** B6: server PPV unlock (wallet debit). After Razorpay checkout, call this to fulfill entitlement. */
 	unlockPpvPost: (postId: string) => Promise<{ ok: boolean, error?: string, alreadyOwned?: boolean }>;
@@ -425,7 +467,6 @@ interface ContentContextValue {
 	createPost: (input: CreatePostInput) => Promise<void>;
 	editPost: (postId: string, text: string) => Promise<void>;
 	deletePost: (postId: string) => Promise<void>;
-	reportPost: (postId: string, reason: string) => Promise<ReportPostResponse>;
 	subscribe: (creatorUserId: string) => void;
 	unsubscribe: (creatorUserId: string) => void;
 	isSubscribed: (creatorUserId: string) => boolean;
@@ -446,7 +487,8 @@ interface ContentContextValue {
 	creatorWsGetByPk: (creatorRowId: string) => Promise<CreatorGetResponse>;
 	/** Resolve creator profile by author user id (user_id from posts). */
 	creatorWsGetByUserId: (creatorUserId: string) => Promise<CreatorGetResponse>;
-	creatorWsUpsert: (username: string, name: string, bio?: string) => Promise<void>;
+	creatorWsUpsert: (username: string, name: string, opts?: CreatorUpsertOpts) => Promise<void>;
+	userWsUpdateProfile: (opts: UserUpdateProfileOpts) => Promise<User>;
 	isPostSaved: (postId: string) => boolean;
 	savePost: (postId: string) => Promise<void>;
 	unsavePost: (postId: string) => Promise<void>;
@@ -693,6 +735,18 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				},
 			});
 		});
+		const offCommentDeleted = ws.on('posts', 'commentdeleted', (data: unknown) => {
+			const pl = data as CommentDeletedEventPayload;
+			if (!pl?.post_id || pl?.root_comment_id == null) return;
+			dispatch({
+				type: 'REMOVE_COMMENT_SUBTREE',
+				payload: {
+					postId: String(pl.post_id),
+					rootCommentId: String(pl.root_comment_id),
+					deletedCount: typeof pl.deleted_count === 'number' ? pl.deleted_count : undefined,
+				},
+			});
+		});
 		return () => {
 			offNew();
 			offUpdated();
@@ -700,6 +754,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 			offLike();
 			offComment();
 			offCommentHeart();
+			offCommentDeleted();
 		};
 	}, [ws, wsConnected, handlePush]);
 
@@ -802,13 +857,18 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 	);
 
 	const creatorWsUpsert = useCallback(
-		(username: string, name: string, bio?: string) =>
-			wsRequestLine('creator', (() => {
-				const parts: string[] = ['/upsertprofile', username.trim(), name.trim()];
-				const b = bio?.trim();
-				if (b) parts.push(b);
-				return parts.join(' ');
-			})()).then(() => {}),
+		(username: string, name: string, opts?: CreatorUpsertOpts) =>
+			wsRequestLine('creator', buildCreatorUpsertCommand(username, name, opts)).then(() => {}),
+		[wsRequestLine]
+	);
+
+	const userWsUpdateProfile = useCallback(
+		(opts: UserUpdateProfileOpts) =>
+			wsRequestLine('user', buildUserUpdateProfileCommand(opts)).then(json => {
+				const user = parseUserMeResponse(json);
+				if (!user) throw new Error('updateprofile returned no user');
+				return user;
+			}),
 		[wsRequestLine]
 	);
 
@@ -871,8 +931,12 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 		if (prev?.userId === u.id && prev.username === username) return;
 		creatorBootstrapRef.current = { userId: u.id, username };
 
-		const bio = (u as unknown as { bio?: string }).bio;
-		void creatorWsUpsert(username, name, typeof bio === 'string' && bio.trim() ? bio.trim() : undefined)
+		const bio = u.bio?.trim();
+		void creatorWsUpsert(username, name, {
+			bio: bio || undefined,
+			bannerUrl: u.banner?.trim() || undefined,
+			avatarUrl: u.avatar?.trim() || undefined,
+		})
 			.then(() => creatorWsSearch({}))
 			.then(r => {
 				const patch: Record<string, CreatorDisplay> = {};
@@ -1132,6 +1196,22 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 		[wsRequestLine]
 	);
 
+	const deleteCommentAsAuthor = useCallback(
+		(postId: string, commentId: string) =>
+			wsRequestLine('posts', `/deletecomment ${commentId}`).then(json => {
+				const body = json as { post_id?: string, deleted_count?: number };
+				dispatch({
+					type: 'REMOVE_COMMENT_SUBTREE',
+					payload: {
+						postId: String(body.post_id || postId),
+						rootCommentId: commentId,
+						deletedCount: typeof body.deleted_count === 'number' ? body.deleted_count : undefined,
+					},
+				});
+			}),
+		[wsRequestLine]
+	);
+
 	const addPost = useCallback((post: Post) => {
 		dispatch({ type: 'ADD_POST', payload: post });
 	}, []);
@@ -1169,15 +1249,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 			dispatch({ type: 'DELETE_POST', payload: postId });
 		});
 	}, [wsRequestLine]);
-
-	const reportPost = useCallback(
-		(postId: string, reason: string): Promise<ReportPostResponse> => {
-			const trimmed = reason.trim();
-			const cmd = trimmed ? `/report ${postId} ${trimmed}` : `/report ${postId}`;
-			return wsRequestLine('posts', cmd).then(json => json as ReportPostResponse);
-		},
-		[wsRequestLine]
-	);
 
 	const updatePost = useCallback((post: Partial<Post> & { id: string }) => {
 		if (post.text === undefined) {
@@ -1284,6 +1355,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				addComment,
 				addReply,
 				heartComment,
+				deleteCommentAsAuthor,
 				unlockPost,
 				unlockPpvPost,
 				refreshPostFromServer,
@@ -1291,7 +1363,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				createPost,
 				editPost,
 				deletePost,
-				reportPost,
 				subscribe,
 				unsubscribe,
 				isSubscribed,
@@ -1307,6 +1378,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 				creatorWsGetByPk,
 				creatorWsGetByUserId,
 				creatorWsUpsert,
+				userWsUpdateProfile,
 				isPostSaved,
 				savePost,
 				unsavePost,

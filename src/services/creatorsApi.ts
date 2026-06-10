@@ -1,6 +1,8 @@
-import type { User } from '../types';
+import type { CreatorDashboard, User } from '../types';
 import type { ContentStreamsResponse, PostDTO, PostInsightsResponse } from './postsTypes';
+import { ZERO_MINOR } from '../utils/money';
 import { getSessionToken, setSessionToken } from './sessionToken';
+import type { ListConversationsResponse } from './chatWsTypes';
 import {
 	parseShareEventResponse,
 	parseShareMetadata,
@@ -24,6 +26,7 @@ export type CreatorProfileResponse = User & {
 	isFollowed?: boolean,
 	profileLikeCount?: number,
 	isProfileLiked?: boolean,
+	/** Minor units as string per API. */
 	subscriptionPriceMinor?: string | null,
 	/** creators table PK when distinct from user id. */
 	creatorProfileId?: string,
@@ -33,12 +36,6 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 	const root = json as Record<string, unknown> | null;
 	const maybeWrapped = root && typeof root === 'object' && 'creator' in root ? root.creator : root;
 	const obj = (maybeWrapped ?? {}) as Record<string, unknown>;
-
-	const asString = (v: unknown): string => (
-		typeof v === 'string' ? v :
-		typeof v === 'number' ? String(v) :
-		''
-	);
 
 	const avatar =
 		(typeof obj.avatarUrl === 'string' && obj.avatarUrl) ||
@@ -61,12 +58,26 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 		catFirst;
 
 	const userId = asString(obj.userId ?? obj.user_id);
-	const creatorProfileId = asString(obj.id);
+	const rowPk = asString(obj.id);
+	const id = userId || rowPk;
+	const creatorProfileId = rowPk && rowPk !== userId ? rowPk : undefined;
+	const followerCount = typeof obj.followerCount === 'number' ? obj.followerCount : undefined;
+	const profileLikeCount = typeof obj.profileLikeCount === 'number' ? obj.profileLikeCount : undefined;
+	const isFollowed = typeof obj.isFollowed === 'boolean' ? obj.isFollowed : undefined;
+	const isProfileLiked = typeof obj.isProfileLiked === 'boolean' ? obj.isProfileLiked : undefined;
+	const subscriptionPriceMinor =
+		typeof obj.subscriptionPriceMinor === 'string' ? obj.subscriptionPriceMinor :
+		obj.subscriptionPriceMinor == null ? null :
+		undefined;
+	const socials =
+		obj.socials && typeof obj.socials === 'object' && !Array.isArray(obj.socials) ?
+			obj.socials as Record<string, unknown> :
+			undefined;
 
 	return {
 		...(obj as unknown as User),
-		id: userId || creatorProfileId,
-		creatorProfileId: creatorProfileId && creatorProfileId !== userId ? creatorProfileId : undefined,
+		id,
+		creatorProfileId,
 		email: asString(obj.email),
 		name: asString(obj.name),
 		username: asString(obj.username),
@@ -77,14 +88,85 @@ function normalizeCreatorProfileResponse(json: unknown): CreatorProfileResponse 
 		category: categoryField,
 		createdAt: asString(obj.createdAt ?? obj.created_at) || '',
 		categories,
-		followerCount: typeof obj.followerCount === 'number' ? obj.followerCount : undefined,
-		isFollowed: typeof obj.isFollowed === 'boolean' ? obj.isFollowed : undefined,
-		profileLikeCount: typeof obj.profileLikeCount === 'number' ? obj.profileLikeCount : undefined,
-		isProfileLiked: typeof obj.isProfileLiked === 'boolean' ? obj.isProfileLiked : undefined,
-		subscriptionPriceMinor:
-			typeof obj.subscriptionPriceMinor === 'string' ? obj.subscriptionPriceMinor :
-			obj.subscriptionPriceMinor == null ? null :
-			undefined,
+		socials,
+		followerCount,
+		isFollowed,
+		profileLikeCount,
+		isProfileLiked,
+		subscriptionPriceMinor: subscriptionPriceMinor === undefined ? undefined : subscriptionPriceMinor,
+	};
+}
+
+function asString(v: unknown): string {
+	return typeof v === 'string' ? v :
+		typeof v === 'number' ? String(v) :
+		'';
+}
+
+/** Normalize HTTP or WS `user /me` and profile responses to app `User`. */
+export function normalizeMeUser(raw: unknown): User | null {
+	if (raw == null) return null;
+	const root = raw as Record<string, unknown>;
+	const maybeUser = root.user !== undefined ? root.user : raw;
+	if (maybeUser == null || typeof maybeUser !== 'object') return null;
+	const obj = maybeUser as Record<string, unknown>;
+
+	const id = asString(obj.id ?? obj.user_id);
+	if (!id) return null;
+
+	let minor =
+		typeof obj.walletBalanceMinor === 'string' ? obj.walletBalanceMinor :
+		typeof obj.walletBalanceMinor === 'number' ? String(obj.walletBalanceMinor) :
+		'';
+	if (!minor && obj.walletBalance != null) {
+		if (typeof obj.walletBalance === 'number') {
+			minor = String(Math.max(0, Math.round(obj.walletBalance)));
+		} else if (typeof obj.walletBalance === 'string' && /^\d+$/.test(obj.walletBalance.trim())) {
+			minor = obj.walletBalance.trim();
+		}
+	}
+	if (!minor) minor = ZERO_MINOR;
+
+	const avatar =
+		(typeof obj.avatar === 'string' && obj.avatar) ||
+		(typeof obj.avatar_url === 'string' && obj.avatar_url) ||
+		'';
+	const banner =
+		(typeof obj.banner === 'string' && obj.banner) ||
+		(typeof obj.banner_url === 'string' && obj.banner_url) ||
+		undefined;
+
+	const perMinuteRaw = obj.perMinuteRate ?? obj.per_minute_rate;
+	const perMinuteRate =
+		typeof perMinuteRaw === 'number' ? perMinuteRaw :
+		typeof perMinuteRaw === 'string' && perMinuteRaw.trim() !== '' && !Number.isNaN(Number(perMinuteRaw)) ?
+			Number(perMinuteRaw) :
+			null;
+
+	const dash = obj.creatorDashboard ?? obj.creator_dashboard;
+	const creatorDashboard =
+		dash && typeof dash === 'object' ? dash as CreatorDashboard : undefined;
+
+	const base = obj as unknown as User;
+	return {
+		...base,
+		id,
+		email: asString(obj.email) || base.email,
+		name: asString(obj.name ?? obj.display_name) || base.name,
+		username: asString(obj.username) || base.username,
+		avatar,
+		banner,
+		bio: typeof obj.bio === 'string' ? obj.bio : base.bio,
+		category: typeof obj.category === 'string' ? obj.category : base.category,
+		role: (obj.role === 'fan' || obj.role === 'creator' || obj.role === 'admin') ? obj.role : base.role,
+		createdAt: asString(obj.createdAt ?? obj.created_at) || base.createdAt,
+		isAgeVerified: typeof obj.isAgeVerified === 'boolean' ? obj.isAgeVerified : base.isAgeVerified,
+		status: (obj.status === 'active' || obj.status === 'suspended' || obj.status === 'banned') ?
+			obj.status :
+			base.status,
+		walletBalanceMinor: /^\d+$/.test(minor) ? minor : ZERO_MINOR,
+		perMinuteRate,
+		creatorDashboard,
 	};
 }
 
@@ -135,6 +217,11 @@ export interface UpdateMyProfileResponse {
 	user: User;
 }
 
+export interface ChangePasswordRequest {
+	currentPassword: string;
+	newPassword: string;
+}
+
 export interface NotificationSettings {
 	messages: boolean;
 	subscriptions: boolean;
@@ -155,20 +242,45 @@ export interface UpdateNotificationSettingsResponse {
 	settings: NotificationSettings;
 }
 
-export interface ChangePasswordRequest {
-	currentPassword: string;
-	newPassword: string;
-}
+export type ReportTargetType = 'post' | 'comment' | 'message' | 'user' | 'live';
 
 export interface CreateReportRequest {
-	targetType: 'post' | 'user' | 'message';
+	targetType: ReportTargetType;
 	targetId: string;
 	reason: string;
-	description?: string;
+	/** Optional long text (max 4000 per spec). */
+	details?: string;
 }
 
-export interface CreateReportResponse {
+export type CreateReportResponse =
+	{ ok: true, reportId: string } |
+	{ ok: true, already_reported: true };
+
+export interface InAppNotificationApiRow {
+	id: string;
+	title: string;
+	body: string | null;
+	data: Record<string, unknown>;
+	read_at: string | null;
+	deleted_at: string | null;
+	created_at: string;
+}
+
+export interface MeNotificationsListParams {
+	limit?: number;
+	before?: string;
+	unreadOnly?: boolean;
+	includeDeleted?: boolean;
+}
+
+export interface MeNotificationsListResponse {
+	notifications: InAppNotificationApiRow[];
+	next_cursor: string | null;
+}
+
+export interface MeNotificationsDismissAllResponse {
 	ok: true;
+	updated: number;
 }
 
 export interface PaymentGatewayResponse {
@@ -243,6 +355,49 @@ export interface PaymentsTipResponse {
 		created_at: string,
 	};
 	from_balance_after: string;
+}
+
+/** B8: POST /payments/tip/live */
+export interface PaymentsTipLiveRequest {
+	liveId: string;
+	amountCents: string;
+	idempotencyKey?: string;
+	currency?: string;
+}
+
+export interface PaymentsTipLiveResponse {
+	tip_id: string;
+	from_balance_after: string;
+	tip_total_minor: string;
+}
+
+/** C4: GET /live/:liveId/analytics */
+export interface LiveStreamAnalyticsResponse {
+	live_id: string;
+	viewer_count: number;
+	like_count: number;
+	tip_total_minor: string;
+	tip_count: number;
+	tips_sum_cents: string;
+	started_at?: string;
+	ended_at?: string | null;
+}
+
+/** C4: GET /me/live/analytics */
+export interface LiveMyAnalyticsStreamRow {
+	id: string;
+	title?: string | null;
+	viewer_count: number;
+	tip_total_minor: string;
+	started_at?: string;
+	ended_at?: string | null;
+}
+
+export interface LiveMyAnalyticsResponse {
+	stream_count: number;
+	total_viewer_count: number;
+	total_tip_minor: string;
+	streams: LiveMyAnalyticsStreamRow[];
 }
 
 export interface PaymentsPpvUnlockRequest {
@@ -377,6 +532,26 @@ function requestJsonAllow201<T>(
 		});
 }
 
+/** GET with Bearer when logged in; omit header for guests (public routes). */
+function requestJsonOptionalAuth<T>(
+	path: string,
+	init: Omit<RequestInit, 'body'> = {}
+): Promise<T> {
+	const url = `${apiBaseUrl()}${path.startsWith('/') ? '' : '/'}${path}`;
+	const headers = new Headers(init.headers);
+	headers.set('Accept', 'application/json');
+	const token = getSessionToken();
+	if (token) headers.set('Authorization', `Bearer ${token}`);
+
+	return globalThis.fetch(url, { ...(init as RequestInit), headers })
+		.then(res => {
+			if (res.ok) return readJsonSafe(res).then(v => v as T);
+			return readJsonSafe(res).then(errorBody => {
+				throw new ApiError(`HTTP ${res.status} for ${path}`, res.status, errorBody);
+			});
+		});
+}
+
 export const creatorsApi = {
 	auth: {
 		register(body: RegisterRequest): Promise<AuthTokenResponse> {
@@ -401,7 +576,8 @@ export const creatorsApi = {
 				});
 		},
 		me(signal?: AbortSignal): Promise<MeResponse> {
-			return requestJson<MeResponse>('/me', { method: 'GET', auth: true, signal });
+			return requestJson<MeResponse>('/me', { method: 'GET', auth: true, signal })
+				.then(res => ({ user: res.user != null ? normalizeMeUser(res.user) : null }));
 		},
 		/** Caller must clear local session after this resolves (see AuthContext.logout). */
 		logout(): Promise<{ ok: true }> {
@@ -410,7 +586,12 @@ export const creatorsApi = {
 	},
 	me: {
 		updateProfile(body: UpdateMyProfileRequest): Promise<UpdateMyProfileResponse> {
-			return requestJson<UpdateMyProfileResponse>('/me/profile', { method: 'POST', body, auth: true });
+			return requestJson<UpdateMyProfileResponse>('/me/profile', { method: 'POST', body, auth: true })
+				.then(res => {
+					const user = normalizeMeUser(res.user);
+					if (!user) throw new Error('POST /me/profile returned no user');
+					return { user };
+				});
 		},
 		/** Spec: POST /me/password — Bearer; body { currentPassword, newPassword } (min 8). */
 		changePassword(body: { currentPassword: string, newPassword: string }): Promise<{ ok: true }> {
@@ -422,6 +603,30 @@ export const creatorsApi = {
 			},
 			update(body: UpdateNotificationSettingsRequest): Promise<UpdateNotificationSettingsResponse> {
 				return requestJson<UpdateNotificationSettingsResponse>('/me/notification-settings', { method: 'PUT', body, auth: true });
+			},
+		},
+		notifications: {
+			list(params?: MeNotificationsListParams, signal?: AbortSignal): Promise<MeNotificationsListResponse> {
+				const q = new URLSearchParams();
+				if (params?.limit != null) q.set('limit', String(params.limit));
+				if (params?.before) q.set('before', params.before);
+				if (params?.unreadOnly) q.set('unreadOnly', 'true');
+				if (params?.includeDeleted) q.set('includeDeleted', 'true');
+				const qs = q.toString();
+				const path = `/me/notifications${qs ? `?${qs}` : ''}`;
+				return requestJson<MeNotificationsListResponse>(path, { method: 'GET', auth: true, signal });
+			},
+			dismiss(notificationId: string, signal?: AbortSignal): Promise<{ ok: true }> {
+				return requestJson<{ ok: true }>(
+					`/me/notifications/${encodeURIComponent(notificationId)}`,
+					{ method: 'DELETE', auth: true, signal }
+				);
+			},
+			clearAll(signal?: AbortSignal): Promise<MeNotificationsDismissAllResponse> {
+				return requestJson<MeNotificationsDismissAllResponse>(
+					'/me/notifications/clear-all',
+					{ method: 'POST', auth: true, signal }
+				);
 			},
 		},
 	},
@@ -446,6 +651,10 @@ export const creatorsApi = {
 		},
 		tip(body: PaymentsTipRequest): Promise<PaymentsTipResponse> {
 			return requestJsonAllow201<PaymentsTipResponse>('/payments/tip', { method: 'POST', body, auth: true });
+		},
+		/** B8: POST /payments/tip/live */
+		tipLive(body: PaymentsTipLiveRequest): Promise<PaymentsTipLiveResponse> {
+			return requestJsonAllow201<PaymentsTipLiveResponse>('/payments/tip/live', { method: 'POST', body, auth: true });
 		},
 		ppvUnlock(body: PaymentsPpvUnlockRequest): Promise<PaymentsPpvUnlockResponse> {
 			return requestJsonAllow201<PaymentsPpvUnlockResponse>('/payments/ppv/unlock', { method: 'POST', body, auth: true });
@@ -478,11 +687,9 @@ export const creatorsApi = {
 	creators: {
 		/** Public creator card; sends Bearer when logged in so isFollowed / isProfileLiked are accurate. */
 		getById(creatorUserId: string, signal?: AbortSignal): Promise<CreatorProfileResponse> {
-			const token = getSessionToken();
-			return requestJson<unknown>(`/creators/${encodeURIComponent(creatorUserId)}`, {
+			return requestJsonOptionalAuth<unknown>(`/creators/${encodeURIComponent(creatorUserId)}`, {
 				method: 'GET',
 				signal,
-				auth: Boolean(token),
 			}).then(normalizeCreatorProfileResponse);
 		},
 	},
@@ -506,7 +713,36 @@ export const creatorsApi = {
 	},
 	reports: {
 		create(body: CreateReportRequest): Promise<CreateReportResponse> {
-			return requestJson<CreateReportResponse>('/reports', { method: 'POST', body, auth: true });
+			return requestJsonAllow201<CreateReportResponse>('/reports', { method: 'POST', body, auth: true });
+		},
+	},
+	/** B7 HTTP mirror of `chat /listconversations`. */
+	chat: {
+		listConversations(params: { limit: number, before?: string }): Promise<ListConversationsResponse> {
+			const q = new URLSearchParams();
+			q.set('limit', String(params.limit));
+			if (params.before) q.set('before', params.before);
+			return requestJson<ListConversationsResponse>(`/chat/conversations?${q.toString()}`, { method: 'GET', auth: true });
+		},
+	},
+	live: {
+		/** C4: GET /live/:liveId/analytics */
+		analytics(liveId: string, signal?: AbortSignal): Promise<LiveStreamAnalyticsResponse> {
+			return requestJson<LiveStreamAnalyticsResponse>(
+				`/live/${encodeURIComponent(liveId)}/analytics`,
+				{ method: 'GET', auth: true, signal }
+			);
+		},
+		/** C4: GET /me/live/analytics?from=&to= */
+		myAnalytics(params: { from?: string, to?: string }, signal?: AbortSignal): Promise<LiveMyAnalyticsResponse> {
+			const q = new URLSearchParams();
+			if (params.from) q.set('from', params.from);
+			if (params.to) q.set('to', params.to);
+			const qs = q.toString();
+			return requestJson<LiveMyAnalyticsResponse>(
+				`/me/live/analytics${qs ? `?${qs}` : ''}`,
+				{ method: 'GET', auth: true, signal }
+			);
 		},
 	},
 	share: {

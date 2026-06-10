@@ -7,6 +7,7 @@ import { MediaAvatar } from '../../components/ui/MediaAvatar';
 import { MediaBanner } from '../../components/ui/MediaBanner';
 import { TipModal } from '../../components/modals/TipModal';
 import { SubscribeModal } from '../../components/modals/SubscribeModal';
+import { ReportTargetModal } from '../../components/modals/ReportTargetModal';
 import { useAuth } from '../../context/AuthContext';
 import { useContent } from '../../context/ContentContext';
 import { useNotifications } from '../../context/NotificationContext';
@@ -30,7 +31,7 @@ export function CreatorProfile() {
 	const { state: contentState, isSubscribed, loadCreatorPosts, creatorWsGetByUserId } = useContent();
 	const { showToast } = useNotifications();
 	useSession();
-	const { requestSession } = useSessions();
+	const { requestSession, state: sessionsState, clearOutgoing } = useSessions();
 	const ws = useWs();
 	const wsConnected = useWsConnected();
 	const wsAuthReady = useWsAuthReady();
@@ -47,13 +48,17 @@ export function CreatorProfile() {
 	const [profileLikedByMe, setProfileLikedByMe] = useState(false);
 	const [profileLikeBusy, setProfileLikeBusy] = useState(false);
 	const [profileLikePopKey, setProfileLikePopKey] = useState(0);
+	const [showReportUser, setShowReportUser] = useState(false);
+	const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+	const profileMenuRef = useRef<HTMLDivElement | null>(null);
 	const [cancelBusy, setCancelBusy] = useState(false);
 	const [autoRenewBusy, setAutoRenewBusy] = useState(false);
-	const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-	const profileMenuRef = useRef<HTMLDivElement>(null);
 	const hasLoadedCreatorRef = useRef(false);
 
-	const cachedDisplay = useMemo(() => (creatorUserId ? contentState.creatorProfiles[creatorUserId] : undefined), [creatorUserId, contentState.creatorProfiles]);
+	const cachedDisplay = useMemo(
+		() => (creatorUserId ? contentState.creatorProfiles[creatorUserId] : undefined),
+		[creatorUserId, contentState.creatorProfiles]
+	);
 	const cacheCreator = useMemo(
 		() => (creatorUserId && cachedDisplay ? creatorFromCacheDisplay(creatorUserId, cachedDisplay) : null),
 		[creatorUserId, cachedDisplay]
@@ -63,6 +68,19 @@ export function CreatorProfile() {
 		setRemoteCreator(null);
 		hasLoadedCreatorRef.current = false;
 	}, [creatorUserId]);
+
+	// Single outside-click handler for profile menu (deduped — was two identical effects).
+	useEffect(() => {
+		if (!profileMenuOpen) return;
+		function onDocMouseDown(e: MouseEvent) {
+			const t = e.target as Node | null;
+			if (t && profileMenuRef.current && !profileMenuRef.current.contains(t)) {
+				setProfileMenuOpen(false);
+			}
+		}
+		document.addEventListener('mousedown', onDocMouseDown);
+		return () => document.removeEventListener('mousedown', onDocMouseDown);
+	}, [profileMenuOpen]);
 
 	useEffect(() => {
 		if (!creatorUserId) return;
@@ -142,14 +160,18 @@ export function CreatorProfile() {
 	}, [ws, wsConnected, creatorUserId]);
 
 	useEffect(() => {
-		if (!profileMenuOpen) return;
-		function onDoc(e: MouseEvent) {
-			const el = profileMenuRef.current;
-			if (el && !el.contains(e.target as Node)) setProfileMenuOpen(false);
+		if (sessionsState.outgoing.state === 'rejected') {
+			showToast(sessionsState.outgoing.rejected.message || 'Session rejected', 'error');
 		}
-		document.addEventListener('mousedown', onDoc);
-		return () => { document.removeEventListener('mousedown', onDoc); };
-	}, [profileMenuOpen]);
+		if (sessionsState.outgoing.state === 'accepted') {
+			showToast('Session accepted!');
+		}
+	}, [sessionsState.outgoing, showToast]);
+
+	// Clear outgoing state only when leaving this page (avoid infinite effect loop).
+	useEffect(() => {
+		return () => { clearOutgoing(); };
+	}, [clearOutgoing]);
 
 	function handleProfileLikeToggle() {
 		if (!authState.user || !creatorUserId) {
@@ -214,6 +236,12 @@ export function CreatorProfile() {
 	const isOwner =
 		authState.user?.role === 'creator' &&
 		authState.user.id === creatorUserId;
+	const ownerRateMinor =
+		authState.user?.perMinuteRate ??
+		authState.user?.creatorDashboard?.perMinuteRateCents ??
+		null;
+	const ownerPerMinuteRate =
+		ownerRateMinor != null ? Number(ownerRateMinor) / 100 : creator.perMinuteRate;
 	const creatorForDisplay: Creator = isOwner && authState.user ? {
 		...creator,
 		name: authState.user.name.trim() ? authState.user.name : creator.name,
@@ -222,6 +250,7 @@ export function CreatorProfile() {
 		bio: authState.user.bio?.trim() ? authState.user.bio : creator.bio,
 		banner: authState.user.banner?.trim() ? authState.user.banner : creator.banner,
 		category: authState.user.category?.trim() ? authState.user.category : creator.category,
+		perMinuteRate: ownerPerMinuteRate,
 	} : creator;
 
 	const creatorPosts = contentState.posts
@@ -235,18 +264,30 @@ export function CreatorProfile() {
 	const loadedPostCount = contentState.posts.filter(p => p.creatorId === creatorForDisplay.id).length;
 	const postCountShown = Math.max(creatorForDisplay.postCount, loadedPostCount);
 
+	const autoRenew =
+		subDto && typeof (subDto as unknown as { auto_renew?: unknown }).auto_renew === 'boolean' ?
+			Boolean((subDto as unknown as { auto_renew: boolean }).auto_renew) :
+			true;
+
 	function handleStartSession(type: SessionType, durationMinutes: number, _totalCost: number, _payMode: SessionPayMode) {
 		if (!authState.user) return;
 		const kind = type === 'chat' ? 'chat' : 'call';
-		const uiCallType = type === 'audio' ? 'audio' : type === 'video' ? 'video' : undefined;
+		const callModality = type === 'audio' ? 'audio' as const : type === 'video' ? 'video' as const : undefined;
 
 		void requestSession({
 			creatorUserId: creatorForDisplay.id,
 			kind,
 			minutes: durationMinutes,
-			...(kind === 'call' && uiCallType ? { uiCallType } : {}),
+			...(kind === 'call' && callModality ? { callModality } : {}),
 			creatorDisplay: { name: creatorForDisplay.name, avatar: creatorForDisplay.avatar },
 		})
+			.then(() => {
+				const waitLabel =
+					kind === 'call' && callModality === 'audio' ? 'audio call' :
+					kind === 'call' ? 'video call' :
+					'session';
+				showToast(`Session request sent. Waiting for creator (${waitLabel})…`);
+			})
 			.catch(err => {
 				showToast(err instanceof Error ? err.message : 'Failed to request session', 'error');
 			});
@@ -276,39 +317,24 @@ export function CreatorProfile() {
 			.catch((err: unknown) => {
 				showToast(err instanceof Error ? err.message : (isFollowed ? 'Unfollow failed' : 'Follow failed'), 'error');
 			})
-			.finally(() => {
-				setFollowBusy(false);
-			});
+			.finally(() => { setFollowBusy(false); });
 	}
 
 	function handleCancelSubscription() {
 		if (!subId) return;
 		setCancelBusy(true);
 		void cancelWsSubscription(subId)
-			.then(() => {
-				showToast('Subscription cancelled.');
-			})
-			.catch(err => {
-				showToast(err instanceof Error ? err.message : 'Cancel failed', 'error');
-			})
+			.then(() => { showToast('Subscription cancelled.'); })
+			.catch(err => { showToast(err instanceof Error ? err.message : 'Cancel failed', 'error'); })
 			.finally(() => setCancelBusy(false));
 	}
 
-	const autoRenew =
-		subDto && typeof (subDto as unknown as { auto_renew?: unknown }).auto_renew === 'boolean' ?
-			Boolean((subDto as unknown as { auto_renew: boolean }).auto_renew) :
-			true;
 	function handleToggleAutoRenew() {
-		if (!subId) return;
-		if (autoRenewBusy) return;
+		if (!subId || autoRenewBusy) return;
 		setAutoRenewBusy(true);
 		void toggleAutoRenew(subId)
-			.then(() => {
-				showToast('Auto-renew updated.');
-			})
-			.catch(err => {
-				showToast(err instanceof Error ? err.message : 'Failed to update auto-renew', 'error');
-			})
+			.then(() => { showToast('Auto-renew updated.'); })
+			.catch(err => { showToast(err instanceof Error ? err.message : 'Failed to update auto-renew', 'error'); })
 			.finally(() => setAutoRenewBusy(false));
 	}
 
@@ -341,60 +367,87 @@ export function CreatorProfile() {
 						</button>
 					</div>
 
+					{/* Share + context menu — merged from both branches:
+					    - Share button: always visible (both branches agreed)
+					    - Three-dot menu: visible to all non-owners (abhay)
+					      · Subscription management items shown only when subscribed (main)
+					      · Report user shown when logged in (abhay) */}
 					<div className="absolute top-3 right-3 z-10 flex gap-2 items-start">
 						<button
 							type="button"
-							className="w-8 h-8 bg-background/70 text-foreground hover:bg-background/90 dark:bg-black/40 dark:text-white dark:hover:bg-black/60 backdrop-blur-sm rounded-full flex items-center justify-center transition-colors"
+							className="w-8 h-8 bg-background/70 text-foreground hover:bg-background/90 dark:bg-black/40 dark:text-white dark:hover:bg-black/60 backdrop-blur-sm rounded-full flex items-center justify-center"
 						>
 							<Share2 className="w-4 h-4" />
 						</button>
-						{subscribed && subId && !isOwner && !shellOnly ? (
-							<div className="relative" ref={profileMenuRef}>
+
+						{!isOwner && (
+							<div ref={profileMenuRef} className="relative">
 								<button
 									type="button"
-									onClick={() => { setProfileMenuOpen(o => !o); }}
-									className="w-8 h-8 bg-background/70 text-foreground hover:bg-background/90 dark:bg-black/40 dark:text-white dark:hover:bg-black/60 backdrop-blur-sm rounded-full flex items-center justify-center transition-colors"
+									onClick={() => setProfileMenuOpen(v => !v)}
+									className="w-8 h-8 bg-background/70 text-foreground hover:bg-background/90 dark:bg-black/40 dark:text-white dark:hover:bg-black/60 backdrop-blur-sm rounded-full flex items-center justify-center"
+									aria-label="Profile menu"
 									aria-expanded={profileMenuOpen}
 									aria-haspopup="menu"
-									aria-label="Subscription options"
 								>
 									<MoreHorizontal className="w-4 h-4" />
 								</button>
+
 								{profileMenuOpen && (
 									<div
 										role="menu"
-										className="absolute right-0 top-10 min-w-[11rem] rounded-xl border border-border/30 bg-surface py-1 shadow-lg z-30"
+										className="absolute right-0 top-10 min-w-[11rem] rounded-xl border border-border/30 bg-surface2 py-1 shadow-lg z-30"
 									>
-										<button
-											type="button"
-											role="menuitem"
-											disabled={autoRenewBusy}
-											onClick={() => {
-												handleToggleAutoRenew();
-												setProfileMenuOpen(false);
-											}}
-											className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-foreground/10 disabled:opacity-50"
-										>
-											{autoRenewBusy ? 'Updating…' : (autoRenew ? 'Turn off auto-renew' : 'Turn on auto-renew')}
-										</button>
-										<button
-											type="button"
-											role="menuitem"
-											disabled={cancelBusy}
-											onClick={() => {
-												if (window.confirm('Cancel your subscription to this creator?')) {
-													handleCancelSubscription();
+										{/* Subscription management — only when subscribed */}
+										{subscribed && subId && !shellOnly && (
+											<>
+												<button
+													type="button"
+													role="menuitem"
+													disabled={autoRenewBusy}
+													onClick={() => {
+														handleToggleAutoRenew();
+														setProfileMenuOpen(false);
+													}}
+													className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-foreground/10 disabled:opacity-50"
+												>
+													{autoRenewBusy ? 'Updating…' : (autoRenew ? 'Turn off auto-renew' : 'Turn on auto-renew')}
+												</button>
+												<button
+													type="button"
+													role="menuitem"
+													disabled={cancelBusy}
+													onClick={() => {
+														if (window.confirm('Cancel your subscription to this creator?')) {
+															handleCancelSubscription();
+															setProfileMenuOpen(false);
+														}
+													}}
+													className="w-full text-left px-3 py-2 text-sm text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+												>
+													{cancelBusy ? 'Cancelling…' : 'Cancel subscription'}
+												</button>
+											</>
+										)}
+
+										{/* Report user — any logged-in non-owner */}
+										{authState.user && (
+											<button
+												type="button"
+												role="menuitem"
+												onClick={() => {
 													setProfileMenuOpen(false);
-												}
-											}}
-											className="w-full text-left px-3 py-2 text-sm text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
-										>
-											{cancelBusy ? 'Cancelling…' : 'Cancel subscription'}
-										</button>
+													setShowReportUser(true);
+												}}
+												className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-foreground/5"
+											>
+												Report user
+											</button>
+										)}
 									</div>
 								)}
 							</div>
-						) : null}
+						)}
 					</div>
 				</div>
 
@@ -415,17 +468,15 @@ export function CreatorProfile() {
 						{!isOwner && (
 							<div className="flex gap-2 mt-4">
 								{subscribed ? (
-									<>
-										<button
-											type="button"
-											disabled={shellOnly}
-											onClick={() => setShowTipModal(true)}
-											className="flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-sm font-semibold px-3 py-2 rounded-xl transition-all disabled:opacity-40 disabled:pointer-events-none"
-										>
-											<Zap className="w-4 h-4 fill-amber-400" />
-											Tip
-										</button>
-									</>
+									<button
+										type="button"
+										disabled={shellOnly}
+										onClick={() => setShowTipModal(true)}
+										className="flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-sm font-semibold px-3 py-2 rounded-xl transition-all disabled:opacity-40 disabled:pointer-events-none"
+									>
+										<Zap className="w-4 h-4 fill-amber-400" />
+										Tip
+									</button>
 								) : (
 									<button
 										type="button"
@@ -450,12 +501,11 @@ export function CreatorProfile() {
 									type="button"
 									onClick={() => { handleWsFollow(); }}
 									disabled={followBusy || shellOnly}
-									className={
-										'flex items-center gap-1.5 ' +
-										(isFollowed ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/20 ' : 'bg-foreground/10 hover:bg-foreground/15 text-foreground border-border/20 ') +
-										'text-sm font-semibold px-3 py-2 rounded-xl transition-all border border-border/20 ' +
-										'disabled:opacity-50'
-									}
+									className={`flex items-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-xl transition-all border border-border/20 disabled:opacity-50 ${
+										isFollowed ?
+											'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/20' :
+											'bg-foreground/10 hover:bg-foreground/15 text-foreground border-border/20'
+									}`}
 								>
 									{isFollowed ? 'Following' : 'Follow'}
 								</button>
@@ -473,11 +523,15 @@ export function CreatorProfile() {
 					</div>
 
 					<div className="flex items-center gap-2 mb-1">
-						<h1 className={`text-xl font-bold text-foreground dark:text-white ${shellOnly ? 'motion-safe:animate-pulse' : ''}`}>{creatorForDisplay.name}</h1>
+						<h1 className={`text-xl font-bold text-foreground dark:text-white ${shellOnly ? 'motion-safe:animate-pulse' : ''}`}>
+							{creatorForDisplay.name}
+						</h1>
 						{creatorForDisplay.isKYCVerified && <Star className="w-5 h-5 text-amber-400 fill-amber-400" />}
 					</div>
 					<p className="text-muted text-sm mb-2 dark:text-white/40">@{creatorForDisplay.username}</p>
-					{creatorForDisplay.bio && <p className="text-foreground/70 dark:text-white/60 text-sm leading-relaxed mb-4">{creatorForDisplay.bio}</p>}
+					{creatorForDisplay.bio && (
+						<p className="text-foreground/70 dark:text-white/60 text-sm leading-relaxed mb-4">{creatorForDisplay.bio}</p>
+					)}
 
 					<div className="flex gap-4 mb-4">
 						<div className="text-center">
@@ -522,7 +576,9 @@ export function CreatorProfile() {
 								</div>
 								<div className="flex-1">
 									<p className="text-sm font-semibold text-foreground dark:text-white mb-0.5">Subscribe to unlock all content</p>
-									<p className="text-xs text-muted dark:text-white/40">{postCountShown} posts · Starting at {formatINR(creatorForDisplay.subscriptionPrice)}/mo</p>
+									<p className="text-xs text-muted dark:text-white/40">
+										{postCountShown} posts · Starting at {formatINR(creatorForDisplay.subscriptionPrice)}/mo
+									</p>
 								</div>
 								<button
 									type="button"
@@ -591,6 +647,14 @@ export function CreatorProfile() {
 				walletBalanceMinor={authState.user?.walletBalanceMinor ?? '0'}
 				onConfirm={handleStartSession}
 				protocol="sessions"
+			/>
+			<ReportTargetModal
+				isOpen={showReportUser}
+				onClose={() => setShowReportUser(false)}
+				targetType="user"
+				targetId={creatorForDisplay.id}
+				title="Report user"
+				onToast={(msg, t) => showToast(msg, t ?? 'success')}
 			/>
 		</Layout>
 	);
