@@ -1,5 +1,13 @@
 import type { CreatorDashboard, User } from '../types';
 import type { PostDTO } from './postsTypes';
+import type {
+	AdminKycListResponse,
+	CuratedTopResponse,
+	CuratedTopSetRequest,
+	KycSubmitRequest,
+	KycSubmitResponse,
+} from './kycTypes';
+import { normalizeAdminKycListResponse, normalizeCuratedTopResponse } from './kycMap';
 import {
 	normalizeCreatorListResponse,
 	normalizeCreatorTopResponse,
@@ -637,6 +645,11 @@ export const creatorsApi = {
 					.then(normalizePayoutHistory);
 			},
 		},
+		kyc: {
+			submit(body: KycSubmitRequest): Promise<KycSubmitResponse> {
+				return requestJsonAllow201<KycSubmitResponse>('/me/kyc/applications', { method: 'POST', body, auth: true });
+			},
+		},
 		notifications: {
 			list(params?: MeNotificationsListParams, signal?: AbortSignal): Promise<MeNotificationsListResponse> {
 				const q = new URLSearchParams();
@@ -785,6 +798,42 @@ export const creatorsApi = {
 				`/me/live/analytics${qs ? `?${qs}` : ''}`,
 				{ method: 'GET', auth: true, signal }
 			);
+		},
+	},
+	admin: {
+		kyc: {
+			list(params?: { status?: string, limit?: number, before?: string }): Promise<AdminKycListResponse> {
+				const q = new URLSearchParams();
+				if (params?.status?.trim()) q.set('status', params.status.trim());
+				if (params?.limit != null) q.set('limit', String(params.limit));
+				if (params?.before?.trim()) q.set('before', params.before.trim());
+				const qs = q.toString();
+				const path = qs ? `/admin/kyc/applications?${qs}` : '/admin/kyc/applications';
+				return requestJson<unknown>(path, { method: 'GET', auth: true })
+					.then(json => normalizeAdminKycListResponse(json));
+			},
+			approve(applicationId: string): Promise<{ ok: true }> {
+				return requestJson<{ ok: true }>(
+					`/admin/kyc/applications/${encodeURIComponent(applicationId)}/approve`,
+					{ method: 'POST', auth: true }
+				);
+			},
+			reject(applicationId: string, reason: string): Promise<{ ok: true }> {
+				return requestJson<{ ok: true }>(
+					`/admin/kyc/applications/${encodeURIComponent(applicationId)}/reject`,
+					{ method: 'POST', body: { reason }, auth: true }
+				);
+			},
+		},
+		curatedTop: {
+			get(): Promise<CuratedTopResponse> {
+				return requestJson<unknown>('/admin/creators/topcreator', { method: 'GET', auth: true })
+					.then(json => normalizeCuratedTopResponse(json));
+			},
+			set(body: CuratedTopSetRequest): Promise<CuratedTopResponse> {
+				return requestJson<unknown>('/admin/creators/topcreator', { method: 'POST', body, auth: true })
+					.then(json => normalizeCuratedTopResponse(json));
+			},
 		},
 	},
 	share: {

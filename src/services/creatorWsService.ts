@@ -5,6 +5,7 @@ import type {
 	CreatorListResponse,
 	CreatorSummaryDTO,
 	CreatorTopDTO,
+	CreatorTopPrimaryResponse,
 	CreatorTopResponse,
 	CreatorUpsertResponse,
 } from './creatorWsTypes';
@@ -202,4 +203,11 @@ export function creatorUnfollow(ws: WsClient, creatorUserId: string, requestId?:
 	const rid = requestId?.trim() || undefined;
 	if (rid && /\s/.test(rid)) throw new Error('requestId must not contain spaces');
 	return ws.request('creator', 'unfollow', [id], rid).then(json => json as CreatorUnfollowResponse);
+}
+
+export function creatorWsTopPrimary(ws: WsClient, opts?: { limit?: number, cursor?: string }): Promise<CreatorTopPrimaryResponse> {
+	const lim = Math.min(50, Math.max(1, opts?.limit ?? 10));
+	const args: string[] = [`limit=${lim}`];
+	if (opts?.cursor?.trim()) args.push(`cursor=${opts.cursor.trim()}`);
+	return ws.request('creator', 'top', args).then(json => json as CreatorTopPrimaryResponse);
 }
